@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 (unreleased)
+## 0.3.0 (2026-10-21)
 
 Each lighting zone can show its own reading.
 
