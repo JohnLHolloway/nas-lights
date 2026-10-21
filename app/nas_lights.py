@@ -30,7 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import sdk
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 # ---------------------------------------------------------------- configuration
@@ -77,6 +77,8 @@ DEFAULT_CONFIG = {
     "brightness": 100,
     "smoothness": 4,               # color steps between two scale points
     "interval": 5,                 # seconds between readings
+    "fade": 1.5,                   # seconds to blend between status colors (0 = instant)
+    "response": "normal",          # reading smoothing: fast, normal or slow
     "quiet": {"enabled": False, "start": "23:00", "end": "07:00", "action": "off", "dim": 15},
 }
 
@@ -103,7 +105,8 @@ def load_state():
 
 STATE = load_state()
 LIVE = {"reading": None, "unit": "", "applied": None, "pools": {}, "alert": False, "quiet": False,
-        "preview_until": 0, "readings": {}, "net_iface": None, "cpu_sensor": None, "error": None}
+        "preview_until": 0, "readings": {}, "net_iface": None, "cpu_sensor": None, "error": None,
+        "writes": {"mode": 0, "colors": 0, "fades": 0}}   # write counters, for diagnostics
 
 
 def save_state():
@@ -163,8 +166,23 @@ def _scale(pct, lo, hi):
     return round(lo + (hi - lo) * max(0, min(100, pct)) / 100.0)
 
 
-def apply(mode, color=None, brightness=None, speed=None, direction=None):
-    """Switch the device to an effect. Unsupported options are ignored."""
+FADE_FPS = 15
+MODE_FIELDS = ("speed", "brightness", "direction", "color_mode", "colors")
+
+
+def _lerp(a, b, t):
+    ca, cb = _rgb(a), _rgb(b)
+    return "".join(f"{round(ca[k] + (cb[k] - ca[k]) * t):02X}" for k in range(3))
+
+
+def apply(mode, color=None, brightness=None, speed=None, direction=None, fade=0.0):
+    """Switch the device to an effect. Unsupported options are ignored.
+
+    The effect itself is only re-sent when something about it changes. Some
+    controllers (ASRock Polychrome, for one) blank the LEDs for a moment on every
+    mode write, which shows up as a flash on each color update. When the effect
+    is unchanged and `fade` > 0, the color is blended over `fade` seconds.
+    """
     with connect() as c:
         idx = device_index(c)
         ctl = c.controller(idx)
@@ -187,10 +205,28 @@ def apply(mode, color=None, brightness=None, speed=None, direction=None):
             m["colors"] = [shown] * max(1, m["colors_min"])
         elif color and caps["per_led"]:
             m["color_mode"] = sdk.COLOR_MODE_PER_LED
-        c.update_mode(idx, m["index"], m)
+
+        active = ctl["modes"][ctl["active_mode"]] if 0 <= ctl["active_mode"] < len(ctl["modes"]) else None
+        same_mode = (active is not None and active["index"] == m["index"]
+                     and all(active[f] == m[f] for f in MODE_FIELDS))
+        if not same_mode:
+            c.update_mode(idx, m["index"], m)
+            LIVE["writes"]["mode"] += 1
+
         if color and caps["per_led"] and not caps["mode_colors"] and ctl["leds"]:
-            time.sleep(0.05)
-            c.update_leds(idx, [shown] * len(ctl["leds"]))
+            n = len(ctl["leds"])
+            start = ctl["colors"][0] if (same_mode and ctl["colors"]) else None
+            if start and fade and fade > 0 and start != shown:
+                frames = max(2, int(fade * FADE_FPS))
+                for f in range(1, frames + 1):
+                    c.update_leds(idx, [_lerp(start, shown, f / frames)] * n)
+                    time.sleep(fade / frames)
+                LIVE["writes"]["fades"] += 1
+            else:
+                if not same_mode:
+                    time.sleep(0.05)
+                c.update_leds(idx, [shown] * n)
+                LIVE["writes"]["colors"] += 1
         time.sleep(0.1)                          # let the server finish before the socket closes
 
 
@@ -289,11 +325,11 @@ def pick_iface():
     return best
 
 
-_net = {"prev": None, "hist": [], "iface": None, "checked": 0}
+_net = {"prev": None, "iface": None, "checked": 0}
 
 
 def net_mbps():
-    """Average host throughput (rx+tx) over the last few samples, in Mbit/s."""
+    """Host throughput (rx+tx) since the previous call, in Mbit/s."""
     if not _net["iface"] or time.time() - _net["checked"] > 600:
         _net["iface"], _net["checked"] = pick_iface(), time.time()
     iface = _net["iface"]
@@ -312,10 +348,7 @@ def net_mbps():
         if dt > 0:
             rate = max(0.0, (total - _net["prev"][1]) * 8 / dt / 1e6)
     _net["prev"] = (now, total, iface)
-    if rate is None:
-        return None
-    _net["hist"] = (_net["hist"] + [rate])[-3:]
-    return sum(_net["hist"]) / len(_net["hist"])
+    return rate
 
 
 def pool_states():
@@ -328,13 +361,34 @@ def pool_states():
     return out
 
 
+RESPONSE_TAU = {"fast": 0.0, "normal": 15.0, "slow": 45.0}   # smoothing time constant, seconds
+_ema = {}
+
+
+def smooth(key, value):
+    """Exponential moving average with a time constant, so readings drift instead of jump."""
+    if value is None:
+        return None
+    tau = RESPONSE_TAU.get(STATE["config"].get("response", "normal"), 15.0)
+    now = time.monotonic()
+    prev = _ema.get(key)
+    if prev is None or tau <= 0:
+        v = value
+    else:
+        a = 1.0 - math.exp(-(now - prev[1]) / tau)
+        v = prev[0] + a * (value - prev[0])
+    _ema[key] = (v, now)
+    return v
+
+
 def readings():
-    d, c, n = drive_temp(), cpu_temp(), net_mbps()
-    return {
-        "drive_temp": round(d, 1) if d is not None else None,
-        "cpu_temp": round(c, 1) if c is not None else None,
-        "network": round(n, 1) if n is not None else None,
-    }
+    raw = {"drive_temp": drive_temp(), "cpu_temp": cpu_temp(), "network": net_mbps()}
+    out = {}
+    for k, v in raw.items():
+        sv = smooth(k, v)
+        out[k] = round(sv, 1) if sv is not None else None
+    LIVE["raw"] = {k: (round(v, 1) if v is not None else None) for k, v in raw.items()}
+    return out
 
 
 # ---------------------------------------------------------------- color math
@@ -342,23 +396,53 @@ def _rgb(h):
     return [int(h[k:k + 2], 16) for k in (0, 2, 4)]
 
 
-def scale_color(mode, value, steps=None):
+def _scale_pos(mode, value):
+    """Where a value sits on a scale, as stop index + fraction (0 .. len(stops)-1)."""
     stops = sorted(STATE["config"]["scales"][mode], key=lambda s: s[0])
-    steps = steps or int(STATE["config"].get("smoothness", 4))
     f = (lambda v: math.log10(max(float(v), 0.1))) if mode == "network" else float
     x = f(value)
     pts = [f(s[0]) for s in stops]
-    cols = [s[1] for s in stops]
-    if len(stops) == 1 or x <= pts[0]:
-        return cols[0].upper()
+    if len(pts) == 1 or x <= pts[0]:
+        return 0.0, stops
     if x >= pts[-1]:
-        return cols[-1].upper()
+        return float(len(pts) - 1), stops
     i = max(k for k in range(len(pts) - 1) if pts[k] <= x)
     span = pts[i + 1] - pts[i]
-    t = (x - pts[i]) / span if span else 0.0
-    t = round(t * steps) / steps                     # quantize: small changes do not rewrite the light
-    a, b = _rgb(cols[i]), _rgb(cols[i + 1])
-    return "".join(f"{round(a[k] + (b[k] - a[k]) * t):02X}" for k in range(3))
+    return i + ((x - pts[i]) / span if span else 0.0), stops
+
+
+def _pos_color(pos, stops):
+    cols = [s[1].upper() for s in stops]
+    if pos <= 0:
+        return cols[0]
+    if pos >= len(cols) - 1:
+        return cols[-1]
+    i = int(pos)
+    return _lerp(cols[i], cols[i + 1], pos - i)
+
+
+def scale_color(mode, value, steps=None):
+    """Color for a value, quantized to the configured number of steps between points."""
+    steps = steps or int(STATE["config"].get("smoothness", 4))
+    pos, stops = _scale_pos(mode, value)
+    return _pos_color(round(pos * steps) / steps, stops)
+
+
+_held = {}
+
+
+def status_color(mode, value):
+    """Like scale_color, with hysteresis: a reading must move 3/4 of a step away
+    from the current step before the color changes, so noise near a boundary
+    does not make the light bounce between two colors."""
+    steps = int(STATE["config"].get("smoothness", 4))
+    pos, stops = _scale_pos(mode, value)
+    q = round(pos * steps) / steps
+    held = _held.get(mode)
+    if held is not None and abs(pos - held) < 0.75 / steps:
+        q = held
+    _held[mode] = q
+    return _pos_color(q, stops)
 
 
 def in_quiet_hours():
@@ -451,14 +535,14 @@ def status_loop():
                     if mode == "health":
                         target = ["Static", cfg["health_color"], bri]
                     elif LIVE["reading"] is not None:
-                        target = ["Static", scale_color(mode, LIVE["reading"]), bri]
+                        target = ["Static", status_color(mode, LIVE["reading"]), bri]
                     else:
                         target = None
                 if target and target != LIVE["applied"]:
                     with LOCK:
                         if STATE.get("status_mode") == mode:
                             eff = target[0] if target[0] == "Off" else color_effect(target[0])
-                            apply(eff, target[1], target[2])
+                            apply(eff, target[1], target[2], fade=float(cfg.get("fade", 1.5)))
                             LIVE["applied"] = target
             LIVE["error"] = None
         except Exception as e:                              # keep running; show the problem in the UI
@@ -504,6 +588,12 @@ def clean_config(c):
         out["smoothness"] = max(1, min(16, int(c["smoothness"])))
     if "interval" in c:
         out["interval"] = max(2, min(60, int(c["interval"])))
+    if "fade" in c:
+        out["fade"] = round(max(0.0, min(5.0, float(c["fade"]))), 1)
+    if "response" in c:
+        if c["response"] not in RESPONSE_TAU:
+            raise ValueError("response must be fast, normal or slow")
+        out["response"] = c["response"]
     if "quiet" in c:
         q = c["quiet"]
         if not HHMM.match(str(q.get("start", ""))) or not HHMM.match(str(q.get("end", ""))):

@@ -23,7 +23,7 @@ services:
 
   nas-lights:
     build: .
-    image: nas-lights:0.1.0
+    image: nas-lights:0.2.0
     restart: unless-stopped
     depends_on: [openrgb]
     environment:

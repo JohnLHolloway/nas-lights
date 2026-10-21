@@ -177,6 +177,15 @@ footer a{color:inherit}
       <label>Smoothness: <span id="smv"></span> color steps between points</label><input type="range" id="sSm" min="1" max="16" oninput="smv.textContent=this.value">
       <div style="height:12px"></div>
       <label>Check every <span id="iv"></span> seconds</label><input type="range" id="sIv" min="2" max="60" oninput="iv.textContent=this.value">
+      <div style="height:12px"></div>
+      <label>Fade between colors: <span id="fdv"></span></label><input type="range" id="sFd" min="0" max="5" step="0.5" oninput="fdv.textContent=fadeLabel(this.value)">
+      <div style="height:12px"></div>
+      <label for="sRs">Response</label>
+      <select id="sRs">
+        <option value="fast">Fast: follow every reading</option>
+        <option value="normal">Normal: smooth out short spikes</option>
+        <option value="slow">Slow: only show sustained changes</option>
+      </select>
     </div>
     <div class="card">
       <h2>Quiet hours</h2>
@@ -327,14 +336,16 @@ function fxControls(){
 }
 
 /* ---------- settings ---------- */
+function fadeLabel(v){v=+v;return v===0?"off (instant)":v+" s"}
 function fillSettings(){const c=S.config;
   $("aCol").value="#"+c.alert.color;$("aFx").innerHTML=S.alert_effects.map(e=>`<option ${e===c.alert.effect?"selected":""}>${e}</option>`).join("");
   $("hCol").value="#"+c.health_color;
   $("sBri").value=c.brightness;$("sbv").textContent=c.brightness;$("sSm").value=c.smoothness;$("smv").textContent=c.smoothness;$("sIv").value=c.interval;$("iv").textContent=c.interval;
+  $("sFd").value=c.fade;$("fdv").textContent=fadeLabel(c.fade);$("sRs").value=c.response;
   $("qOn").checked=c.quiet.enabled;$("qS").value=c.quiet.start;$("qE").value=c.quiet.end;$("qA").value=c.quiet.action;$("qD").value=c.quiet.dim;$("qdv").textContent=c.quiet.dim}
 async function saveSettings(){busy(true);try{
   S=await api("api/config",{alert:{color:$("aCol").value.slice(1),effect:$("aFx").value},health_color:$("hCol").value.slice(1),
-    brightness:+$("sBri").value,smoothness:+$("sSm").value,interval:+$("sIv").value,
+    brightness:+$("sBri").value,smoothness:+$("sSm").value,interval:+$("sIv").value,fade:+$("sFd").value,response:$("sRs").value,
     quiet:{enabled:$("qOn").checked,start:$("qS").value,end:$("qE").value,action:$("qA").value,dim:+$("qD").value}});
   fillSettings();paintHero();toast("Settings saved")}catch(e){toast("Not saved: "+e.message)}finally{busy(false)}}
 

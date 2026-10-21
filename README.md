@@ -12,6 +12,10 @@ Turn the RGB lighting in your NAS into a status display. NAS Lights is a small w
   - network throughput
   - ZFS health only
 - **Editable color scales.** Each reading has its own scale of points, such as 30 °C blue, 42 °C green and 55 °C red. Add, remove and recolor points on a live gradient that marks the current reading.
+- **Smooth, flicker-free changes.**
+  - Colors fade into each other over an adjustable time instead of jumping.
+  - Readings are smoothed, so a short burst of traffic doesn't flash the case red.
+  - A small hysteresis band keeps a reading that sits on a color boundary from bouncing between two colors.
 - **Try before you save.** Drag a slider to any reading and preview that color on the real lights for 15 seconds.
 - **Problem alert.** Any ZFS pool that isn't `ONLINE` overrides the status color with an alert style you choose, even during quiet hours.
 - **Quiet hours.** Turn the lights off or dim them overnight.
@@ -84,7 +88,7 @@ TrueNAS custom apps can't build images, so build them once from a shell on the N
 ```bash
 git clone https://github.com/JohnLHolloway/nas-lights.git /mnt/<pool>/apps/nas-lights
 cd /mnt/<pool>/apps/nas-lights
-sudo docker build -t nas-lights:0.1.0 .
+sudo docker build -t nas-lights:0.2.0 .
 sudo docker build -t nas-lights-openrgb:1.1 openrgb/
 ```
 
@@ -120,6 +124,16 @@ Mount the host's `/sys` read-only at `/host/sys`. Without it, the container sees
 
 Network scales are logarithmic, so both idle trickles and big transfers get visible color changes. The light is only rewritten when a reading crosses into a new color step, which avoids constant writes to the controller. The Smoothness setting controls the step size.
 
+### Smoothing settings
+
+These are on the Settings tab:
+
+| Setting | Default | Effect |
+|---|---|---|
+| Fade between colors | 1.5 s | How long a color change blends. Set 0 for instant. |
+| Response | Normal | **Fast** follows every reading. **Normal** smooths out spikes over about 15 seconds. **Slow** only shows changes that last about a minute. |
+| Smoothness | 4 | Color steps between two scale points. More steps means finer color changes, and more frequent ones. |
+
 ## API
 
 The UI uses a small JSON API, which you can also script against. POST requests must send `Content-Type: application/json`.
@@ -145,6 +159,7 @@ curl -X POST -H 'Content-Type: application/json' \
 
 Tested with OpenRGB 1.1 on an ASRock B850M-C, which uses the Polychrome USB controller, under TrueNAS SCALE 25.10. Some things learned along the way:
 
+- **Mode writes can blank the LEDs.** Some controllers, ASRock included, briefly blank the lights whenever an effect is re-sent. NAS Lights only sends the effect when it actually changes, and updates colors on their own. Earlier versions re-sent the effect on every color change, which showed up as a flash.
 - **Reversed speed ranges.** Some controllers, ASRock included, report speed with 255 as slowest and 0 as fastest. OpenRGB's command-line `--speed` ignores them, so NAS Lights sets speed through the SDK, which handles either direction.
 - **Brightness.** Most effects on these controllers have no hardware brightness. NAS Lights dims the color instead, so the brightness slider and quiet-hours dimming still work.
 - **Profiles.** OpenRGB servers ignore profile-save requests from network clients. NAS Lights stores your last manual setting itself and reapplies it.
@@ -166,6 +181,7 @@ Tested with OpenRGB 1.1 on an ASRock B850M-C, which uses the Polychrome USB cont
 | Drive temperature shows `--` | Load the `drivetemp` module, and check that `/sys/class/hwmon/*/name` lists `drivetemp`. |
 | Network stays near zero | Mount `/sys:/host/sys:ro`, and set `NET_IFACE` if auto-detect picks the wrong interface. The footer shows which one it uses. |
 | Lights flicker between two colors | Something else is also driving OpenRGB, such as another client or a second NAS Lights. |
+| Lights flash on every color change | Check `writes` in `GET /api/live`. `mode` should stay flat while `fades` and `colors` grow. If `mode` keeps climbing, please open an issue with your controller model. |
 
 To see exactly what your controller supports, list it with the bundled SDK client:
 
