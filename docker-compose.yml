@@ -1,15 +1,19 @@
 # NAS Lights + a headless OpenRGB server.
 #
-#   docker compose up -d --build
+#   docker compose up -d
 #   open http://<nas-ip>:6780
+#
+# Uses the prebuilt images from GitHub Container Registry. To build them
+# yourself instead, uncomment the two `build:` lines and run
+# `docker compose up -d --build`.
 #
 # Already running OpenRGB somewhere else (another container, your PC)?
 # Delete the `openrgb` service and point OPENRGB_HOST at it.
 
 services:
   openrgb:
-    build: ./openrgb
-    image: nas-lights-openrgb:1.1
+    image: ghcr.io/johnlholloway/nas-lights-openrgb:0.2    # OpenRGB 1.1, amd64 only
+    # build: ./openrgb
     restart: unless-stopped
     # OpenRGB needs raw access to USB HID / SMBus RGB controllers.
     privileged: true
@@ -22,8 +26,8 @@ services:
     #   - "6742:6742"
 
   nas-lights:
-    build: .
-    image: nas-lights:0.2.0
+    image: ghcr.io/johnlholloway/nas-lights:0.2            # amd64 and arm64
+    # build: .
     restart: unless-stopped
     depends_on: [openrgb]
     environment:

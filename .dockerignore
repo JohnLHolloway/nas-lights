@@ -1,8 +1,8 @@
 .git
+.github
+.venv
+**/__pycache__
+.pytest_cache
+.ruff_cache
+tests
 docs
-openrgb
-*.md
-.gitignore
-__pycache__
-*.pyc
-data
