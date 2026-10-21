@@ -1,0 +1,16 @@
+# Dev tooling only. NAS Lights itself is standard-library Python with no
+# dependencies; see requirements-dev.txt for the test and lint tools.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["app", "tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 140
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]
+# Short lambda arguments (`l` for a sensor label) read fine here.
+ignore = ["E741"]

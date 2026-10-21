@@ -1,15 +1,19 @@
 # NAS Lights + a headless OpenRGB server.
 #
-#   docker compose up -d --build
+#   docker compose up -d
 #   open http://<nas-ip>:6780
+#
+# Uses the prebuilt images from GitHub Container Registry. To build them
+# yourself instead, uncomment the two `build:` lines and run
+# `docker compose up -d --build`.
 #
 # Already running OpenRGB somewhere else (another container, your PC)?
 # Delete the `openrgb` service and point OPENRGB_HOST at it.
 
 services:
   openrgb:
-    build: ./openrgb
-    image: nas-lights-openrgb:1.1
+    image: ghcr.io/johnlholloway/nas-lights-openrgb:0.3    # OpenRGB 1.1, amd64 only
+    # build: ./openrgb
     restart: unless-stopped
     # OpenRGB needs raw access to USB HID / SMBus RGB controllers.
     privileged: true
@@ -22,8 +26,8 @@ services:
     #   - "6742:6742"
 
   nas-lights:
-    build: .
-    image: nas-lights:0.2.0
+    image: ghcr.io/johnlholloway/nas-lights:0.3            # amd64 and arm64
+    # build: .
     restart: unless-stopped
     depends_on: [openrgb]
     environment:
@@ -33,12 +37,17 @@ services:
       # NET_IFACE: enp8s0          # default: busiest physical interface
       # CPU_SENSOR: k10temp        # default: k10temp, zenpower, coretemp, cpu_thermal
       # DRIVE_SENSOR: drivetemp    # hwmon name(s), comma separated; e.g. drivetemp,nvme
+      # DISK_DEVICES: sda,sdb,sdc  # default: every physical disk
+      # NASL_PUSH_TOKEN: change-me # require this bearer token on POST /api/push
     ports:
       - "6780:6780"
     volumes:
       - nas-lights-data:/data
       - /sys:/host/sys:ro                    # host NIC counters and hwmon sensors
       - /etc/localtime:/etc/localtime:ro     # quiet hours use local time
+      # Optional: scrub/resilver detection. A host cron job writes `zpool status`
+      # into this folder once a minute; see "Scrub and resilver" in README.md.
+      # - /mnt/tank/apps/nas-lights/zfs:/host/zfs:ro
 
 volumes:
   openrgb-config:

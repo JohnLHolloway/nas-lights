@@ -1,0 +1,46 @@
+  pool: apps
+ state: ONLINE
+  scan: scrub repaired 0B in 00:00:31 with 0 errors on Sun Oct  4 00:00:32 2026
+config:
+
+	NAME                                    STATE     READ WRITE CKSUM
+	apps                                    ONLINE       0     0     0
+	  disk-1  ONLINE       0     0     0
+
+errors: No known data errors
+
+  pool: boot-pool
+ state: ONLINE
+  scan: scrub repaired 0B in 00:00:06 with 0 errors on Wed Oct 14 03:45:08 2026
+config:
+
+	NAME         STATE     READ WRITE CKSUM
+	boot-pool    ONLINE       0     0     0
+	  nvme1n1p3  ONLINE       0     0     0
+
+errors: No known data errors
+
+  pool: tank
+ state: ONLINE
+status: One or more devices has experienced an unrecoverable error.  An
+	attempt was made to correct the error.  Applications are unaffected.
+action: Determine if the device needs to be replaced, and clear the errors
+	using 'zpool clear' or replace the device with 'zpool replace'.
+   see: https://openzfs.github.io/openzfs-docs/msg/ZFS-8000-9P
+  scan: scrub in progress since Tue Oct 20 16:26:23 2026
+	12.6T / 12.6T scanned, 5.52T / 12.6T issued at 293M/s
+	2M repaired, 43.76% done, 07:02:40 to go
+config:
+
+	NAME                                      STATE     READ WRITE CKSUM
+	tank                                      ONLINE       0     0     0
+	  mirror-0                                ONLINE       0     0     0
+	    disk-2  ONLINE       0     0     0
+	    disk-3  ONLINE       0     0     0
+	    disk-4  ONLINE       0     0     0
+	  mirror-1                                ONLINE       0     0     0
+	    disk-5  ONLINE       0     0     0
+	    disk-6  ONLINE       0     0     3  (repairing)
+	    disk-7  ONLINE       0     0     0
+
+errors: No known data errors
