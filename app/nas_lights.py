@@ -65,6 +65,7 @@ STATE_FILE = os.path.join(DATA_DIR, "settings.json")
 
 LOCK = threading.RLock()
 WAKE = threading.Event()                             # set to make the status loop run now
+STOP = threading.Event()                             # set to end the background threads (tests)
 HEX = re.compile(r"^[0-9A-Fa-f]{6}$")
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
@@ -448,7 +449,7 @@ class Renderer:
                     LIVE["writes"]["colors"] += 1
 
     def run(self):
-        while True:
+        while not STOP.is_set():
             if self.target is None:
                 time.sleep(0.2)
                 continue
@@ -854,7 +855,7 @@ class ServerWatch:
 def status_loop():
     watch = ServerWatch()
     zones = []
-    while True:
+    while not STOP.is_set():
         cfg = STATE["config"]
         try:
             fresh = watch.changed()

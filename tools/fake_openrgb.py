@@ -76,7 +76,7 @@ class Device:
         for name, ztype, n in ZONES:
             out += s(name) + struct.pack("<iIIIH", ztype, n, n, n, 0)
         out += struct.pack("<H", len(self.colors))
-        for zi, (name, _, n) in enumerate(ZONES):
+        for name, _, n in ZONES:
             for k in range(n):
                 out += s(f"{name} LED {k + 1}") + struct.pack("<I", 0)
         out += struct.pack("<H", len(self.colors))

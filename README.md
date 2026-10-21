@@ -1,5 +1,7 @@
 # NAS Lights
 
+[![CI](https://github.com/JohnLHolloway/nas-lights/actions/workflows/ci.yml/badge.svg)](https://github.com/JohnLHolloway/nas-lights/actions/workflows/ci.yml)
+
 Turn the RGB lighting in your NAS into a status display. NAS Lights is a small web app that drives [OpenRGB](https://openrgb.org) and colors your case by what the server is doing. Each lighting zone can show its own reading: drive temperature on one header, network traffic on a fan strip, ZFS health on another. A scrub makes the lights pulse slowly, and if a pool degrades, every zone starts breathing red.
 
 ![Status tab](docs/screenshots/status-dark.png)
@@ -65,19 +67,31 @@ NAS Lights talks to OpenRGB over its network SDK, so it doesn't need OpenRGB ins
 ## Quick start (Docker Compose)
 
 ```bash
-git clone https://github.com/JohnLHolloway/nas-lights.git
-cd nas-lights
-docker compose up -d --build
+mkdir nas-lights && cd nas-lights
+curl -fsSLO https://raw.githubusercontent.com/JohnLHolloway/nas-lights/main/docker-compose.yml
+docker compose up -d
 ```
 
 Open `http://<your-nas>:6780`.
 
-The example [`docker-compose.yml`](docker-compose.yml) starts two containers:
+The example [`docker-compose.yml`](docker-compose.yml) starts two containers from prebuilt images:
 
-| Service | What it does |
-|---|---|
-| `openrgb` | Headless OpenRGB server built from the official AppImage. It runs privileged so it can reach USB HID and SMBus devices. |
-| `nas-lights` | The web UI and status engine. It runs unprivileged with a read-only view of `/sys`. |
+| Service | Image | What it does |
+|---|---|---|
+| `openrgb` | `ghcr.io/johnlholloway/nas-lights-openrgb` | Headless OpenRGB 1.1 server from the official AppImage. It runs privileged so it can reach USB HID and SMBus devices. amd64 only. |
+| `nas-lights` | `ghcr.io/johnlholloway/nas-lights` | The web UI and status engine. It runs unprivileged with a read-only view of `/sys`. amd64 and arm64. |
+
+Images are published for every release and tagged with the version (`0.3.0`), the minor version (`0.3`) and `latest`. The compose file uses the minor version, so `docker compose pull` picks up fixes but not breaking changes.
+
+### Building the images yourself
+
+Clone the repo, uncomment the two `build:` lines in `docker-compose.yml`, and run:
+
+```bash
+docker compose up -d --build
+```
+
+On an ARM NAS the `openrgb` image won't run, because the OpenRGB AppImage is x86_64 only. Delete that service and use an OpenRGB server on the host or another machine, as described next.
 
 ### Already running OpenRGB?
 
@@ -92,16 +106,9 @@ If OpenRGB runs on the same host with the default settings, it listens only on `
 
 ### TrueNAS SCALE
 
-TrueNAS custom apps can't build images, so build them once from a shell on the NAS:
+Go to **Apps**, **Discover Apps**, **Custom App**, and **Install via YAML**, then paste [`docker-compose.yml`](docker-compose.yml) as it is. TrueNAS pulls the images; nothing needs to be built or cloned.
 
-```bash
-git clone https://github.com/JohnLHolloway/nas-lights.git /mnt/<pool>/apps/nas-lights
-cd /mnt/<pool>/apps/nas-lights
-sudo docker build -t nas-lights:0.3.0 .
-sudo docker build -t nas-lights-openrgb:1.1 openrgb/
-```
-
-Then go to **Apps**, **Discover Apps**, **Custom App**, and **Install via YAML**. Paste the compose file with the `build:` lines removed and `pull_policy: never` added to both services. Replace the named volumes with host paths on your pool if you want the settings on a dataset. The data folder must be writable by UID 1000.
+To keep the settings on a dataset, replace `nas-lights-data` with a host path such as `/mnt/<pool>/apps/nas-lights:/data`. That folder must be writable by UID 1000.
 
 ## Configuration
 
@@ -287,23 +294,27 @@ docker compose exec nas-lights python /app/sdk.py openrgb
 
 ## Development
 
-You don't need RGB hardware. `tools/fake_openrgb.py` is a fake OpenRGB server that behaves like the ASRock controller, and `tools/fake_host.py` writes changing sensor, network, disk and `zpool status` files:
+The app is standard-library Python. Tests and lint need pytest and ruff:
+
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest
+ruff check .
+```
+
+The tests run against fake OpenRGB SDK servers, so no hardware is needed. CI runs them on every push and pull request. Pushing a `v*` tag builds and publishes the images. See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
+To try the UI without a NAS, run [`tools/fake_openrgb.py`](tools/fake_openrgb.py), a fake server that behaves like the ASRock controller, and [`tools/fake_host.py`](tools/fake_host.py), which writes changing sensor, network, disk and `zpool status` files:
 
 ```bash
 python tools/fake_openrgb.py --http 6743 &          # device state as JSON on :6743
 python tools/fake_host.py /tmp/fakehost --scrub &
-HOST_SYS=/tmp/fakehost/sys HOST_PROC=/tmp/fakehost/proc ZFS_KSTAT=/tmp/fakehost/kstat \
-ZPOOL_STATUS_FILE=/tmp/fakehost/zpool-status.txt NASL_DATA=/tmp/fakehost/data python app/nas_lights.py
-```
-
-The tests use the fake server:
-
-```bash
-python -m unittest discover -s tests -v
+HOST_SYS=/tmp/fakehost/sys HOST_PROC=/tmp/fakehost/proc ZFS_KSTAT=/tmp/fakehost/kstat ZPOOL_STATUS_FILE=/tmp/fakehost/zpool-status.txt NASL_DATA=/tmp/fakehost/data python app/nas_lights.py
 ```
 
 ## Credits and license
 
 NAS Lights is MIT licensed; see [LICENSE](LICENSE). It is an independent project and is not affiliated with OpenRGB.
 
-[OpenRGB](https://codeberg.org/OpenRGB/OpenRGB) is GPL-2.0 licensed. This repository doesn't include OpenRGB. The optional [`openrgb/Dockerfile`](openrgb/Dockerfile) downloads the official release when you build it.
+[OpenRGB](https://codeberg.org/OpenRGB/OpenRGB) is GPL-2.0 licensed. This repository doesn't include OpenRGB's source. The optional [`openrgb/Dockerfile`](openrgb/Dockerfile) downloads the official, unmodified release, and the prebuilt `nas-lights-openrgb` image contains that release; its source is available from the OpenRGB repository linked above.

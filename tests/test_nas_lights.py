@@ -1,9 +1,9 @@
-"""Tests for NAS Lights, run against the fake OpenRGB server in tools/.
+"""Per-zone engine, readings and API tests, against the ASRock-like fake server in tools/.
 
-    python -m unittest discover -s tests -v
-
-Standard library only.
+Run with the rest of the suite (`pytest`), or alone with
+`python -m unittest tests.test_nas_lights`.
 """
+import importlib.util
 import json
 import os
 import socket
@@ -16,7 +16,7 @@ import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES = os.path.join(ROOT, "tests", "fixtures")
-sys.path[:0] = [os.path.join(ROOT, "app"), os.path.join(ROOT, "tools")]
+sys.path.insert(0, os.path.join(ROOT, "app"))
 
 
 def free_port():
@@ -27,12 +27,31 @@ def free_port():
 
 TMP = tempfile.mkdtemp(prefix="nasl-test-")
 SDK_PORT, WEB_PORT = free_port(), free_port()
-os.environ.update(OPENRGB_HOST="127.0.0.1", OPENRGB_PORT=str(SDK_PORT), NASL_DATA=os.path.join(TMP, "data"),
-                  ZPOOL_STATUS_FILE=os.path.join(TMP, "zpool-status.txt"), ZFS_KSTAT=os.path.join(TMP, "kstat"),
-                  HOST_SYS=os.path.join(TMP, "sys"), HOST_PROC=os.path.join(TMP, "proc"))
+os.environ.setdefault("NASL_DATA", os.path.join(TMP, "data"))
 
-import fake_openrgb  # noqa: E402
 import nas_lights as nl  # noqa: E402
+
+# tests/fake_openrgb.py (used by the other test files) has the same module name, so load this one by path.
+_spec = importlib.util.spec_from_file_location("tools_fake_openrgb", os.path.join(ROOT, "tools", "fake_openrgb.py"))
+fake_openrgb = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(fake_openrgb)
+
+# nas_lights may already be imported (by conftest.py), so point it at the fakes by attribute, not environment.
+SETTINGS = dict(OPENRGB_HOST="127.0.0.1", OPENRGB_PORT=SDK_PORT, OPENRGB_DEVICE="0",
+                ZPOOL_STATUS_FILE=os.path.join(TMP, "zpool-status.txt"), ZFS_KSTAT=os.path.join(TMP, "kstat"),
+                HOST_SYS=os.path.join(TMP, "sys"), HOST_PROC=os.path.join(TMP, "proc"))
+
+
+def setUpModule():
+    global SAVED
+    SAVED = {k: getattr(nl, k) for k in SETTINGS}
+    for k, v in SETTINGS.items():
+        setattr(nl, k, v)
+
+
+def tearDownModule():
+    for k, v in SAVED.items():
+        setattr(nl, k, v)
 
 
 def start_fake_server():
@@ -284,10 +303,25 @@ class Api(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         nl.STATE["config"]["interval"] = 2
-        srv = nl.ThreadingHTTPServer(("127.0.0.1", WEB_PORT), nl.Handler)
-        threading.Thread(target=srv.serve_forever, daemon=True).start()
-        threading.Thread(target=nl.RENDER.run, daemon=True).start()
-        threading.Thread(target=nl.status_loop, daemon=True).start()
+        nl.STOP.clear()
+        cls.srv = nl.ThreadingHTTPServer(("127.0.0.1", WEB_PORT), nl.Handler)
+        cls.threads = [threading.Thread(target=f, daemon=True) for f in (cls.srv.serve_forever, nl.RENDER.run, nl.status_loop)]
+        for t in cls.threads:
+            t.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        nl.STOP.set()
+        nl.WAKE.set()
+        cls.srv.shutdown()
+        for t in cls.threads:
+            t.join(10)
+        nl.RENDER.release()
+        nl.STATE["status_mode"] = "none"
+        nl.STOP.clear()
+
+    def setUp(self):
+        nl.STATE["config"]["interval"] = 2      # other tests may have reset the config
 
     def call(self, path, body=None, headers=None):
         h = {"Content-Type": "application/json", **(headers or {})}
