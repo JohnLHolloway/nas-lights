@@ -2,7 +2,7 @@
 
 Implements the parts of the OpenRGB network protocol that NAS Lights uses:
 protocol negotiation, controller count, controller data (modes, zones, LEDs),
-mode updates, LED color updates, and server-side profile save/load.
+mode updates, LED and per-zone color updates, and server-side profile save/load.
 
 Protocol reference: the SDK documentation in the OpenRGB repository,
 https://codeberg.org/OpenRGB/OpenRGB
@@ -18,6 +18,7 @@ PKT_REQUEST_PROFILE_LIST = 150
 PKT_REQUEST_SAVE_PROFILE = 151
 PKT_REQUEST_LOAD_PROFILE = 152
 PKT_UPDATE_LEDS = 1050
+PKT_UPDATE_ZONE_LEDS = 1051
 PKT_UPDATE_MODE = 1101
 
 # Highest protocol version whose controller layout this client understands.
@@ -100,6 +101,12 @@ class SDK:
         payload = struct.pack("<H", len(colors)) + b"".join(struct.pack("<I", _rgb_to_u32(c)) for c in colors)
         self._send(PKT_UPDATE_LEDS, struct.pack("<I", len(payload) + 4) + payload, dev=idx)
 
+    def update_zone_leds(self, idx, zone, colors):
+        """Set the colors of one zone's LEDs; other zones are left alone."""
+        payload = (struct.pack("<IH", zone, len(colors))
+                   + b"".join(struct.pack("<I", _rgb_to_u32(c)) for c in colors))
+        self._send(PKT_UPDATE_ZONE_LEDS, struct.pack("<I", len(payload) + 4) + payload, dev=idx)
+
     def save_profile(self, name):
         self._send(PKT_REQUEST_SAVE_PROFILE, name.encode() + b"\0")
 
@@ -180,8 +187,11 @@ def parse_controller(b, proto):
     c["modes"] = modes
 
     zones = []
-    for _ in range(r.u16()):
-        z = {"name": r.string(), "type": r.i32(), "leds_min": r.u32(), "leds_max": r.u32(), "leds_count": r.u32()}
+    start = 0
+    for i in range(r.u16()):
+        z = {"index": i, "name": r.string(), "type": r.i32(), "leds_min": r.u32(), "leds_max": r.u32(),
+             "leds_count": r.u32(), "start": start}
+        start += z["leds_count"]
         matrix_len = r.u16()
         if matrix_len:
             r.o += matrix_len                 # height, width and map; not needed here
@@ -250,6 +260,8 @@ if __name__ == "__main__":
         for i in range(s.count()):
             c = s.controller(i)
             print(f"\n[{i}] {c['name']} ({c['description']}), {len(c['leds'])} LEDs, active: {c['modes'][c['active_mode']]['name']}")
+            for z in c["zones"]:
+                print(f"    zone {z['index']}: {z['name']}, {z['leds_count']} LEDs")
             for m in c["modes"]:
                 caps = {k: v for k, v in capabilities(m).items() if v not in (False, [], 0) and k != "name"}
                 print(f"    {m['name']:<16} {json.dumps(caps)}")

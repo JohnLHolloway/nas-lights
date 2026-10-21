@@ -7,42 +7,62 @@
 <style>
 :root{
   --bg:#f4f4f6;--panel:#ffffff;--panel2:#f0f0f3;--fg:#15151a;--muted:#6b6b76;--line:#e3e3e8;
-  --acc:#4f46e5;--accfg:#fff;--ok:#16a34a;--bad:#dc2626;--glow:#00e070;
+  --acc:#4f46e5;--accfg:#fff;--ok:#16a34a;--bad:#dc2626;--glow:#00e070;--led-off:#d9d9df;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#09090c;--panel:#131318;--panel2:#1b1b22;--fg:#f2f2f5;--muted:#9a9aa6;--line:#26262f;
-  --acc:#818cf8;--accfg:#0b0b10;--ok:#4ade80;--bad:#f87171;
+  --acc:#818cf8;--accfg:#0b0b10;--ok:#4ade80;--bad:#f87171;--led-off:#24242c;
 }}
+:root[data-theme="dark"]{
+  --bg:#09090c;--panel:#131318;--panel2:#1b1b22;--fg:#f2f2f5;--muted:#9a9aa6;--line:#26262f;
+  --acc:#818cf8;--accfg:#0b0b10;--ok:#4ade80;--bad:#f87171;--led-off:#24242c;
+}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
-main{max-width:640px;margin:0 auto;padding:20px 16px 48px}
+main{max-width:660px;margin:0 auto;padding:20px 16px 48px}
 button,input,select{font:inherit;color:inherit}
 button{cursor:pointer;border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:9px 14px}
 button:hover{border-color:var(--muted)}
 button.primary{background:var(--acc);border-color:var(--acc);color:var(--accfg);font-weight:600}
 button.ghost{background:transparent}
+button.danger{border-color:var(--bad);color:var(--bad);background:transparent;font-weight:600}
 button:disabled{opacity:.5;cursor:progress}
 input[type=number],input[type=time],select{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 9px;width:100%}
 input[type=color]{-webkit-appearance:none;appearance:none;width:38px;height:38px;border:1px solid var(--line);border-radius:10px;padding:3px;background:var(--panel2);cursor:pointer}
 input[type=color]::-webkit-color-swatch-wrapper{padding:0}input[type=color]::-webkit-color-swatch{border:none;border-radius:7px}
 input[type=range]{width:100%;accent-color:var(--acc)}
 label{display:block;font-size:13px;color:var(--muted);margin-bottom:5px}
+code{font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:1px 5px}
+pre{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;overflow-x:auto;margin:8px 0 0;white-space:pre}
 
 /* hero */
-.hero{display:flex;align-items:center;gap:20px;padding:22px;border-radius:20px;background:var(--panel);border:1px solid var(--line);position:relative;overflow:hidden}
-.hero::before{content:"";position:absolute;inset:-40%;background:radial-gradient(circle at 18% 50%,var(--glow) 0,transparent 42%);opacity:.22;transition:background .8s}
+.hero{padding:22px;border-radius:20px;background:var(--panel);border:1px solid var(--line);position:relative;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:-40%;background:radial-gradient(circle at 18% 40%,var(--glow) 0,transparent 42%);opacity:.22;transition:background .8s}
+.hero-top{display:flex;align-items:center;gap:20px;position:relative}
 .orb{flex:none;width:86px;height:86px;border-radius:50%;background:var(--glow);position:relative;
   box-shadow:0 0 24px 4px var(--glow),0 0 70px 10px color-mix(in srgb,var(--glow) 45%,transparent),inset 0 -10px 22px rgba(0,0,0,.25),inset 0 8px 16px rgba(255,255,255,.35);
   transition:background .8s,box-shadow .8s}
 .orb.off{background:#2a2a33;box-shadow:inset 0 -10px 22px rgba(0,0,0,.35),inset 0 8px 16px rgba(255,255,255,.08)}
-.orb.breathe{animation:breathe 2.4s ease-in-out infinite}
+.breathe{animation:breathe 2.4s ease-in-out infinite}
+.pulse{animation:pulse var(--period,6s) ease-in-out infinite}
 @keyframes breathe{50%{filter:brightness(.35)}}
+@keyframes pulse{0%,100%{filter:brightness(1)}50%{filter:brightness(.45)}}
+.orb.pulse{animation-name:orbpulse}.orb.breathe{animation-name:orbbreathe}
+@keyframes orbpulse{0%,100%{opacity:1}50%{opacity:.45}}@keyframes orbbreathe{50%{opacity:.35}}
 .hero-txt{position:relative;min-width:0}
 .hero h1{font-size:24px;margin:0;letter-spacing:-.01em}
-.hero .big{font-size:30px;font-weight:700;letter-spacing:-.02em;margin:2px 0}
+.hero .big{font-size:30px;font-weight:700;letter-spacing:-.02em;margin:2px 0;font-variant-numeric:tabular-nums}
 .hero .sub{color:var(--muted);font-size:13px}
 .pill{display:inline-block;font-size:12px;padding:2px 9px;border-radius:99px;background:var(--panel2);border:1px solid var(--line);margin-right:6px;margin-top:6px}
-.pill.ok{color:var(--ok)}.pill.bad{color:var(--bad);border-color:var(--bad)}
+.pill.ok{color:var(--ok)}.pill.bad{color:var(--bad);border-color:var(--bad)}.pill.scan{color:var(--acc);border-color:var(--acc)}
+
+/* zone strip: one glowing LED bar per zone */
+.strip{position:relative;display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-top:18px}
+.led{min-width:0}
+.led .lbar{height:8px;border-radius:5px;background:var(--led-off);transition:background .8s,box-shadow .8s}
+.led.lit .lbar{background:var(--c);box-shadow:0 0 10px 1px var(--c),0 0 24px 2px color-mix(in srgb,var(--c) 40%,transparent)}
+.led .n{font-size:11px;color:var(--muted);margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.led .v{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* tabs */
 .tabs{display:flex;gap:6px;margin:18px 0 12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px}
@@ -50,16 +70,36 @@ label{display:block;font-size:13px;color:var(--muted);margin-bottom:5px}
 .tabs button.on{background:var(--panel2);box-shadow:0 1px 0 var(--line);font-weight:600}
 section{display:none}section.on{display:block}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:12px}
-.card h2{font-size:15px;margin:0 0 4px}.card p.hint{color:var(--muted);font-size:13px;margin:0 0 12px}
+.card h2{font-size:15px;margin:0 0 4px}.card p.hint,p.hint{color:var(--muted);font-size:13px;margin:0 0 12px}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .grow{flex:1;min-width:120px}
+.spread{display:flex;justify-content:space-between;align-items:center;gap:10px}
 
-/* mode tiles */
+/* switch */
+.switch{position:relative;display:inline-flex;align-items:center;gap:8px;margin:0;color:var(--fg);font-size:14px;cursor:pointer}
+.switch input{position:absolute;opacity:0;width:0;height:0}
+.switch .track{width:42px;height:24px;border-radius:12px;background:var(--line);position:relative;transition:background .2s}
+.switch .track::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .2s}
+.switch input:checked+.track{background:var(--acc)}
+.switch input:checked+.track::after{transform:translateX(18px)}
+.switch input:focus-visible+.track{outline:2px solid var(--acc);outline-offset:2px}
+
+/* zone mapping */
+.zrow{display:grid;grid-template-columns:14px minmax(0,1fr) minmax(130px,190px);gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.zrow:first-of-type{border-top:none}
+.zdot{width:14px;height:14px;border-radius:50%;background:var(--led-off);transition:background .8s,box-shadow .8s}
+.zdot.lit{background:var(--c);box-shadow:0 0 8px 1px var(--c)}
+.zname{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.zmeta{color:var(--muted);font-size:12px}
+.zones.disabled .zrow{opacity:.55}
+
+/* reading tiles */
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
 .tile{text-align:left;padding:12px;border-radius:14px;background:var(--panel2);border:1px solid var(--line);position:relative}
 .tile.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset}
 .tile .t{font-size:13px;color:var(--muted)}
-.tile .v{font-size:20px;font-weight:700;margin-top:2px}
+.tile .v{font-size:20px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+.tile .u{font-size:11px;color:var(--muted);margin-top:2px;min-height:15px}
 .tile .chip{position:absolute;top:12px;right:12px;width:12px;height:12px;border-radius:50%}
 
 /* scale editor */
@@ -72,23 +112,32 @@ section{display:none}section.on{display:block}
 .stop button{padding:6px 10px}
 .swatches{display:flex;gap:8px;flex-wrap:wrap}
 .sw{width:38px;height:38px;border-radius:50%;padding:0;border:2px solid var(--line)}
+.status-line{font-size:13px;margin-top:10px;color:var(--muted)}
+.status-line b{color:var(--fg)}
+.status-line.bad b{color:var(--bad)}
 footer{margin-top:22px;text-align:center;color:var(--muted);font-size:12px}
 footer a{color:inherit}
 #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(80px);background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;transition:transform .25s;max-width:90vw}
 #toast.show{transform:translateX(-50%) translateY(0)}
 .dirty{color:var(--acc);font-size:13px;display:none}.dirty.show{display:inline}
+@media (max-width:480px){.zrow{grid-template-columns:14px minmax(0,1fr)}.zrow select{grid-column:2}
+  .hero{padding:18px}.hero-top{gap:16px}.orb{width:64px;height:64px}.hero .big{font-size:26px}.strip{grid-template-columns:1fr 1fr;gap:12px 14px}}
+@media (prefers-reduced-motion:reduce){.breathe,.pulse{animation:none}}
 </style>
 </head>
 <body>
 <main>
   <div class="hero">
-    <div class="orb off" id="orb"></div>
-    <div class="hero-txt">
-      <h1>NAS Lights</h1>
-      <div class="big" id="heroBig">Loading</div>
-      <div class="sub" id="heroSub"></div>
-      <div id="pills"></div>
+    <div class="hero-top">
+      <div class="orb off" id="orb"></div>
+      <div class="hero-txt">
+        <h1>NAS Lights</h1>
+        <div class="big" id="heroBig">Loading</div>
+        <div class="sub" id="heroSub"></div>
+        <div id="pills"></div>
+      </div>
     </div>
+    <div class="strip" id="strip"></div>
   </div>
 
   <div class="tabs" role="tablist">
@@ -100,8 +149,20 @@ footer a{color:inherit}
   <!-- STATUS -->
   <section id="tab-status" class="on">
     <div class="card">
-      <h2>What should the lights show?</h2>
-      <p class="hint">Pick a reading. The color follows it live.</p>
+      <div class="spread">
+        <h2>Zones</h2>
+        <label class="switch"><input type="checkbox" id="stOn" onchange="toggleStatus(this.checked)"><span class="track"></span><span id="stLbl">Status lights</span></label>
+      </div>
+      <p class="hint">Give each lighting zone its own reading. Changes apply right away.</p>
+      <div class="zones" id="zones"></div>
+      <div class="row" style="margin-top:6px">
+        <div class="grow"><label for="zAll">Set every zone to</label><select id="zAll" onchange="setAll(this.value)"></select></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Readings</h2>
+      <p class="hint">Live values. Pick one to edit its color scale.</p>
       <div class="tiles" id="tiles"></div>
     </div>
 
@@ -119,7 +180,7 @@ footer a{color:inherit}
         <button class="primary" onclick="saveScale()">Save scale</button>
       </div>
       <div style="height:16px"></div>
-      <label>Try it on the lights: <b id="tryV"></b> <span id="tryU"></span></label>
+      <label>Try it on the lights: <b id="tryV"></b></label>
       <div class="row"><input type="range" id="tryR" class="grow"><button onclick="preview()">Preview 15 s</button></div>
     </div>
   </section>
@@ -158,16 +219,36 @@ footer a{color:inherit}
   <section id="tab-settings">
     <div class="card">
       <h2>Problem alert</h2>
-      <p class="hint">Shown in any status mode when a pool is not healthy. It ignores quiet hours.</p>
+      <p class="hint">Takes over every zone when a pool is not healthy, even during quiet hours.</p>
       <div class="row">
         <div><label>Color</label><input type="color" id="aCol"></div>
         <div class="grow"><label>Effect</label><select id="aFx"></select></div>
-        <div><label>&nbsp;</label><button onclick="preview('alert')">Preview</button></div>
       </div>
+      <div class="row" style="margin-top:12px">
+        <button class="danger grow" id="simBtn" onclick="simulate()">Simulate pool problem</button>
+      </div>
+      <p class="hint" style="margin:8px 0 0">Runs the real alert for 15 seconds, as if a pool were degraded. Save first to try new alert settings.</p>
     </div>
     <div class="card">
-      <h2>Health only</h2>
-      <p class="hint">Color while every pool is healthy.</p>
+      <h2>Scrub and resilver</h2>
+      <p class="hint">A slow pulse while a pool is being scrubbed or resilvered.</p>
+      <div class="row">
+        <div><label>Color</label><input type="color" id="scCol"></div>
+        <div class="grow"><label for="scScope">Pulse</label>
+          <select id="scScope">
+            <option value="all">Every lit zone</option>
+            <option value="health">Only pool health zones</option>
+            <option value="off">Don't show scrubs</option>
+          </select></div>
+      </div>
+      <div style="height:12px"></div>
+      <label>One pulse every <span id="scpv"></span> seconds</label><input type="range" id="scP" min="2" max="20" oninput="scpv.textContent=this.value">
+      <p class="hint" style="margin:6px 0 0">Pool health zones pulse in this color. With "Every lit zone", the other zones pulse their own color.</p>
+      <div class="status-line" id="zpoolLine"></div>
+    </div>
+    <div class="card">
+      <h2>Pool health</h2>
+      <p class="hint">Color of pool health zones while every pool is healthy.</p>
       <div class="row"><div><label>Color</label><input type="color" id="hCol"></div><div><label>&nbsp;</label><button onclick="preview('health')">Preview</button></div></div>
     </div>
     <div class="card">
@@ -203,6 +284,13 @@ footer a{color:inherit}
       </div>
     </div>
     <button class="primary" style="width:100%" onclick="saveSettings()">Save settings</button>
+    <div style="height:12px"></div>
+    <div class="card">
+      <h2>Push values</h2>
+      <p class="hint">Home Assistant or a script can set the color of any zone whose reading is <b>Pushed value</b>. Send a number (placed on the Pushed value scale) or a color.</p>
+      <pre id="pushEx"></pre>
+      <p class="hint" style="margin:10px 0 0" id="pushHint"></p>
+    </div>
   </section>
   <footer id="foot"></footer>
 </main>
@@ -210,9 +298,12 @@ footer a{color:inherit}
 
 <script>
 const $=id=>document.getElementById(id);
-let S=null, editMode="drive_temp", draft=null;
-const ICON={drive_temp:"Drives",cpu_temp:"CPU",network:"Network",health:"Health",none:"Manual"};
+{const t=new URLSearchParams(location.search).get("theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}
+let S=null, editMode="drive_temp", draft=null, simTimer=null;
+const PICK={off:"Off",drive_temp:"Drive temperature",cpu_temp:"CPU temperature",network:"Network",disk_io:"Disk throughput",health:"Pool health",push:"Pushed value"};
+const SHORT={off:"Off",drive_temp:"Drives",cpu_temp:"CPU",network:"Network",disk_io:"Disk I/O",health:"Pool health",push:"Pushed"};
 const QUICK=["FFFFFF","FF0000","FF7A00","FFD400","00E070","00C8FF","2962FF","AA00FF","FF2D95"];
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 function toast(t){const e=$("toast");e.textContent=t;e.classList.add("show");clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove("show"),2600)}
 async function api(path,body){const r=await fetch(path,body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:{});
@@ -226,7 +317,7 @@ document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{showTab(b.da
 showTab((location.hash||"#status").slice(1));
 
 /* ---------- color helpers ---------- */
-const isLog=m=>m==="network";
+const isLog=m=>(S?.log_scales||["network","disk_io"]).includes(m);
 const fx=(m,v)=>isLog(m)?Math.log10(Math.max(+v,0.1)):+v;
 function hexRgb(h){return[0,2,4].map(i=>parseInt(h.substr(i,2),16))}
 function colorAt(m,stops,v){const s=[...stops].sort((a,b)=>a[0]-b[0]);const x=fx(m,v);
@@ -234,46 +325,121 @@ function colorAt(m,stops,v){const s=[...stops].sort((a,b)=>a[0]-b[0]);const x=fx
   for(let i=0;i<s.length-1;i++){const a=fx(m,s[i][0]),b=fx(m,s[i+1][0]);if(x>=a&&x<=b){const t=b>a?(x-a)/(b-a):0;
     const A=hexRgb(s[i][1]),B=hexRgb(s[i+1][1]);return A.map((c,k)=>Math.round(c+(B[k]-c)*t).toString(16).padStart(2,"0")).join("").toUpperCase()}}
   return s[0][1]}
-function fmt(m,v){if(v==null)return"--";return m==="network"?(v>=100?Math.round(v):v.toFixed(1))+" Mbps":v.toFixed(0)+"°C"}
+function fmt(m,v){if(v==null)return"--";
+  if(m==="network")return(v>=100?Math.round(v):v.toFixed(1))+" Mbps";
+  if(m==="disk_io")return(v>=100?Math.round(v):v.toFixed(1))+" MB/s";
+  if(m==="push")return(Math.abs(v)>=100?Math.round(v):+v.toFixed(1))+"";
+  return v.toFixed(0)+"°C"}
+const isBlack=c=>!c||c==="000000";
+const srcOf=name=>{const z=S.zone_sources||{};return z[name]??z["*"]??"off"};
+const scanText=()=>Object.entries(S.live.scans||{}).map(([p,s])=>`${s.kind==="resilver"?"Resilvering":"Scrubbing"} ${p}${s.percent!=null?" · "+Math.floor(s.percent)+"%":""}`);
+const scanBig=()=>{const e=Object.entries(S.live.scans||{})[0];if(!e)return null;const[p,s]=e;
+  return{big:`${s.kind==="resilver"?"Resilver":"Scrub"}${s.percent!=null?" "+Math.floor(s.percent)+"%":""}`,sub:`${p} is being ${s.kind==="resilver"?"resilvered":"scrubbed"}`}};
 
-/* ---------- hero + tiles ---------- */
+/* ---------- hero ---------- */
+function setAnim(el,anim){
+  // pulse in step with the LEDs: the server pulses on wall-clock time, brightest at multiples of the period
+  const p=+S.config.scrub.period||6;el.style.setProperty("--period",p+"s");
+  if(anim==="pulse")el.style.animationDelay=-((Date.now()/1000)%p)+"s";else el.style.animationDelay="";
+  if(el.dataset.anim===anim)return;el.dataset.anim=anim;
+  el.classList.remove("pulse","breathe");if(anim)el.classList.add(anim)}
+function zoneLook(z){
+  // what a zone is showing now: color (or null when dark) and animation
+  const L=S.live,on=S.status_mode!=="none"||L.simulated;
+  if(!on){const lit=S.current&&S.current!=="Off";return{c:lit?S.color:null,anim:""}}
+  if(L.quiet&&!L.alert&&S.config.quiet.action==="off")return{c:null,anim:""};
+  const lz=(L.zones||[]).find(x=>x.name===z.name);if(!lz||isBlack(lz.color))return{c:null,anim:""};
+  const anim=L.alert&&/breath/i.test(L.effect||S.config.alert.effect)?"breathe":lz.pulse?"pulse":"";
+  return{c:lz.color,anim}}
+function zoneValue(name){
+  const L=S.live,lz=(L.zones||[]).find(x=>x.name===name);const src=lz?lz.source:srcOf(name);
+  if(S.status_mode==="none"&&!L.simulated)return S.current==="Off"||!S.current?"Off":S.current;
+  if(L.alert)return"Alert";
+  if(src==="off")return"Off";
+  if(src==="health")return L.scrubbing&&S.config.scrub.scope!=="off"?"Scrub":Object.keys(L.pools||{}).length?"Healthy":"No pools";
+  if(src==="push")return lz&&lz.value!=null?fmt("push",lz.value):lz&&!isBlack(lz.color)?"#"+lz.color:"Waiting";
+  return fmt(src,lz?.value??L.readings?.[src])}
 function paintHero(){
-  const L=S.live, m=S.status_mode, a=L.applied, orb=$("orb");
-  let color=null, breathe=false;
-  if(m!=="none"&&a){if(a[0]!=="Off"){color=a[1];breathe=a[0]==="Breathing"}}
-  else if(m==="none"&&S.current&&S.current!=="Off"){color=S.color}
-  orb.classList.toggle("off",!color);orb.classList.toggle("breathe",breathe);
-  document.documentElement.style.setProperty("--glow",color?"#"+color:"#3a3a44");
+  const L=S.live,m=S.status_mode,orb=$("orb");
+  const looks=(S.zones||[]).map(z=>({z,...zoneLook(z)}));
+  const main=looks.find(x=>x.c);
+  orb.classList.toggle("off",!main);setAnim(orb,main?main.anim:"");
+  document.documentElement.style.setProperty("--glow",main?"#"+main.c:"#3a3a44");
   let big,sub;
-  if(m==="none"){big=S.current==="Off"||!S.current?"Lights off":S.current;sub="Manual mode";}
-  else if(L.alert){big="Pool problem";sub=Object.entries(L.pools).filter(([k,v])=>v!=="ONLINE").map(([k,v])=>k+" is "+v).join(", ");}
-  else if(m==="health"){big="All healthy";sub="Health only";}
-  else{big=fmt(m,L.reading);sub=S.status_modes[m];}
+  if(L.alert){big=L.simulated?"Pool problem (test)":"Pool problem";
+    sub=Object.entries(L.pools).filter(([k,v])=>v!=="ONLINE").map(([k,v])=>k+" is "+v).join(", ");}
+  else if(m==="none"){big=S.current==="Off"||!S.current?"Lights off":S.current;sub="Manual mode";}
+  else{const sc=S.config.scrub.scope!=="off"?scanBig():null;const first=(L.zones||[]).find(z=>z.value!=null&&z.source!=="push");
+    const lit=(L.zones||[]).filter(z=>!isBlack(z.color)).length;
+    if(sc){big=sc.big;sub=sc.sub}
+    else if(first){big=fmt(first.source,first.value);sub=`${first.name} · ${PICK[first.source]}`}
+    else{big=L.pools&&Object.keys(L.pools).length?"All healthy":"Status lights";sub=`${lit} of ${(S.zones||[]).length} zones lit`}}
   if(m!=="none"&&L.quiet)sub+=" · quiet hours";
   if(S.openrgb_error){big="OpenRGB offline";sub=S.openrgb_error}
   else if(L.error&&m!=="none"){sub+=" · "+L.error}
   $("heroBig").textContent=big;$("heroSub").textContent=sub;
-  $("pills").innerHTML=Object.entries(L.pools||{}).map(([k,v])=>`<span class="pill ${v==="ONLINE"?"ok":"bad"}">${k} ${v.toLowerCase()}</span>`).join("");
-  paintTiles();paintMarker();
+  $("pills").innerHTML=Object.entries(L.pools||{}).map(([k,v])=>`<span class="pill ${v==="ONLINE"?"ok":"bad"}">${esc(k)} ${esc(v.toLowerCase())}</span>`).join("")
+    +Object.entries(L.scans||{}).map(([p,s])=>`<span class="pill scan">${esc(p)} ${esc(s.kind)}${s.percent!=null?" "+Math.floor(s.percent)+"%":""}</span>`).join("");
+  const strip=$("strip"),skey=JSON.stringify(S.zones);
+  if(strip._key!==skey){strip._key=skey;strip.innerHTML=(S.zones||[]).map(z=>`<div class="led"><div class="lbar"></div><div class="n">${esc(z.name)}</div><div class="v"></div></div>`).join("")}
+  [...strip.children].forEach((el,i)=>{const{z,c,anim}=looks[i];el.classList.toggle("lit",!!c);el.style.setProperty("--c","#"+(c||"000"));
+    setAnim(el.firstChild,anim);el.lastChild.textContent=zoneValue(z.name)});
+  paintZones();paintTiles();paintMarker();paintSim();paintZpool();
 }
+
+/* ---------- zones ---------- */
+function srcOptions(sel,withKeep){return(withKeep?`<option value="" selected>Choose…</option>`:"")+Object.entries(S.sources).map(([k,v])=>`<option value="${k}" ${k===sel?"selected":""}>${esc(PICK[k]||v)}</option>`).join("")}
+function paintZones(){
+  const box=$("zones");const on=S.status_mode!=="none";
+  $("stOn").checked=on;$("stLbl").textContent=on?"Status lights on":"Status lights off";
+  box.classList.toggle("disabled",!on);
+  if(!(S.zones||[]).length){box.innerHTML=`<p class="hint">No zones yet. Is OpenRGB reachable?</p>`;return}
+  // rebuild only when the zone list or mapping changed, so an open dropdown is not reset
+  const key=JSON.stringify([S.zones,S.zone_sources]);
+  if(box._key!==key){box._key=key;
+    box.innerHTML=S.zones.map(z=>`<div class="zrow" data-z="${esc(z.name)}"><span class="zdot"></span>
+      <div style="min-width:0"><div class="zname">${esc(z.name)}</div><div class="zmeta"><span class="zv"></span> · ${z.leds} LED${z.leds===1?"":"s"}</div></div>
+      <select aria-label="Reading for ${esc(z.name)}" onchange="setZone(${z.index},this.value)">${srcOptions(srcOf(z.name))}</select></div>`).join("");
+    $("zAll").innerHTML=srcOptions(null,true);}
+  box.querySelectorAll(".zrow").forEach(r=>{const z=S.zones.find(x=>x.name===r.dataset.z);const l=zoneLook(z);
+    const d=r.querySelector(".zdot");d.classList.toggle("lit",!!l.c);d.style.setProperty("--c","#"+(l.c||"000"));setAnim(d,l.anim);
+    r.querySelector(".zv").textContent=zoneValue(z.name)});
+}
+function mapping(){const out={};(S.zones||[]).forEach(z=>out[z.name]=srcOf(z.name));out["*"]="off";return out}
+async function saveZones(map,msg){busy(true);try{S=await api("api/zones",{zones:map});paintHero();toast(msg)}catch(e){toast("Not saved: "+e.message)}finally{busy(false)}}
+function setZone(i,src){const z=S.zones.find(x=>x.index===i);const map=mapping();map[z.name]=src;
+  saveZones(map,`${z.name}: ${S.sources[src]}`);if(src in S.config.scales)openScale(src)}
+function setAll(src){if(!src)return;const map={"*":src};saveZones(map,"Every zone: "+S.sources[src]);$("zAll").value="";if(src in S.config.scales)openScale(src)}
+async function toggleStatus(on){busy(true);try{S=await api("api/status",{status_mode:on?"zones":"none"});paintHero();toast(on?"Status lights on":"Status lights off, back to manual")}
+  catch(e){toast("Failed: "+e.message);$("stOn").checked=!on}finally{busy(false)}}
+
+/* ---------- reading tiles ---------- */
 function paintTiles(){
-  const t=$("tiles");const R=(S.live.readings||{});
-  t.innerHTML=Object.keys(S.status_modes).map(k=>{
-    let v="";if(k in R)v=fmt(k,R[k]);else if(k==="health")v=!Object.keys(S.live.pools||{}).length?"No pools":S.live.alert?"Problem":"OK";else v="Off";
-    let chip="";if(k in R&&R[k]!=null)chip=`<span class="chip" style="background:#${colorAt(k,S.config.scales[k],R[k])}"></span>`;
-    if(k==="health")chip=`<span class="chip" style="background:#${S.live.alert?S.config.alert.color:S.config.health_color}"></span>`;
-    return `<button class="tile ${S.status_mode===k?"on":""}" onclick="setStatus('${k}')"><div class="t">${ICON[k]}</div><div class="v">${v}</div>${chip}</button>`}).join("");
+  const t=$("tiles"),R=S.live.readings||{},used={};
+  (S.zones||[]).forEach(z=>{const s=srcOf(z.name);used[s]=(used[s]||0)+1});
+  const keys=["drive_temp","cpu_temp","network","disk_io","health","push"];
+  t.innerHTML=keys.map(k=>{
+    let v,chip="";
+    if(k==="health"){const sc=scanText();v=!Object.keys(S.live.pools||{}).length?"No pools":S.live.alert?"Problem":sc.length?"Scrub":"OK";
+      chip=`<span class="chip" style="background:#${S.live.alert?S.config.alert.color:sc.length?S.config.scrub.color:S.config.health_color}"></span>`}
+    else if(k==="push"){const p=Object.values(S.push||{});v=p.length?(p[0].value!=null?fmt("push",p[0].value):"#"+p[0].color):"None yet";
+      if(p.length)chip=`<span class="chip" style="background:#${p[0].color||colorAt("push",S.config.scales.push,p[0].value)}"></span>`}
+    else{v=fmt(k,R[k]);if(R[k]!=null)chip=`<span class="chip" style="background:#${colorAt(k,S.config.scales[k],R[k])}"></span>`}
+    const u=used[k]?`on ${used[k]} zone${used[k]>1?"s":""}`:"";
+    const click=k in S.config.scales?`openScale('${k}')`:`showTab('settings')`;
+    return `<button class="tile ${editMode===k?"on":""}" onclick="${click}"><div class="t">${SHORT[k]}</div><div class="v">${esc(v)}</div><div class="u">${u}</div>${chip}</button>`}).join("");
 }
 
 /* ---------- scale editor ---------- */
 function openScale(m){
   if(!(m in S.config.scales))m=editMode in S.config.scales?editMode:"drive_temp";
   editMode=m;draft=JSON.parse(JSON.stringify(S.config.scales[m]));
-  $("scaleTitle").textContent="Color scale: "+S.status_modes[m];$("dirty").classList.remove("show");
-  const [lo,hi]=S.limits[m];const r=$("tryR");
-  if(isLog(m)){r.min=-1;r.max=Math.log10(1000);r.step=0.01;r.value=fx(m,S.live.readings?.network??10)}
-  else{r.min=Math.min(lo+10,draft[0][0]-5);r.max=Math.max(draft[draft.length-1][0]+5,hi/1.5);r.step=1;r.value=S.live.readings?.[m]??draft[0][0]}
-  r.oninput=tryLabel;tryLabel();renderStops();
+  $("scaleTitle").textContent="Color scale: "+S.sources[m];$("dirty").classList.remove("show");
+  const [lo,hi]=S.limits[m];const r=$("tryR");const last=draft[draft.length-1][0];
+  if(isLog(m)){r.min=-1;r.max=Math.log10(Math.max(1000,last*1.5));r.step=0.01;r.value=fx(m,S.live.readings?.[m]??10)}
+  else if(m==="push"){r.min=Math.min(0,draft[0][0]);r.max=Math.max(100,last);r.step=1;r.value=draft[0][0]}
+  else{r.min=Math.min(lo+10,draft[0][0]-5);r.max=Math.max(last+5,hi/1.5);r.step=1;r.value=S.live.readings?.[m]??draft[0][0]}
+  r.oninput=tryLabel;tryLabel();renderStops();paintTiles();
 }
 function tryVal(){const r=$("tryR");return isLog(editMode)?Math.pow(10,+r.value):+r.value}
 function tryLabel(){const v=tryVal();$("tryV").textContent=fmt(editMode,v);$("tryV").style.color="#"+colorAt(editMode,draft,v)}
@@ -295,7 +461,8 @@ function paintBar(){
   paintMarker();
 }
 function paintMarker(){
-  const mk=$("mark");if(!mk||!S)return;const v=S.live.readings?.[editMode];
+  const mk=$("mark");if(!mk||!S)return;
+  let v=S.live.readings?.[editMode];if(editMode==="push"){const p=Object.values(S.push||{}).find(x=>x.value!=null);v=p?p.value:null}
   if(v==null){mk.style.display="none";return}mk.style.display="block";
   const s=[...draft].sort((a,b)=>a[0]-b[0]);const a=fx(editMode,s[0][0]),b=fx(editMode,s[s.length-1][0]);
   const p=Math.max(0,Math.min(100,b>a?(fx(editMode,v)-a)/(b-a)*100:0));mk.style.left=p+"%";mk.dataset.v="now "+fmt(editMode,v);
@@ -308,17 +475,29 @@ function addStop(){
   s.push([Math.min(v,S.limits[editMode][1]),"FF00FF"]);changed(true)}
 function resetScale(){draft=JSON.parse(JSON.stringify(S.defaults.scales[editMode]));changed(true)}
 async function saveScale(){
-  busy(true);try{S={...S,...await api("api/config",{scales:{[editMode]:draft}})};$("dirty").classList.remove("show");toast("Scale saved");openScale(editMode);paintHero()}
+  busy(true);try{S=await api("api/config",{scales:{[editMode]:draft}});$("dirty").classList.remove("show");toast("Scale saved");openScale(editMode);paintHero()}
   catch(e){toast("Not saved: "+e.message)}finally{busy(false)}}
 async function preview(kind){
   busy(true);try{
     if(!kind&&$("dirty").classList.contains("show"))toast("Previewing the saved scale. Save first to preview edits.");
-    await api("api/preview",kind?{mode:kind}:{mode:editMode,value:tryVal()});if(kind||!$("dirty").classList.contains("show"))toast("Previewing on the lights for 15 seconds")}
+    await api("api/preview",kind?{mode:kind}:{mode:editMode,value:tryVal()});if(kind||!$("dirty").classList.contains("show"))toast("Previewing on every zone for 15 seconds")}
   catch(e){toast("Preview failed: "+e.message)}finally{busy(false)}}
 
-/* ---------- status / manual ---------- */
-async function setStatus(k){busy(true);try{S=await api("api/status",{status_mode:k});if(k in S.config.scales)openScale(k);paintHero();toast(k==="none"?"Status lights off":S.status_modes[k])}
-  catch(e){toast("Failed: "+e.message)}finally{busy(false)}}
+/* ---------- simulate a pool problem ---------- */
+async function simulate(){
+  const running=S.live.simulated;
+  try{const j=await api("api/simulate",running?{stop:true}:{});
+    S.live.simulated=j.simulating;S._simEnd=j.simulating?Date.now()+j.seconds*1000:0;
+    if(j.simulating)toast("Simulating a degraded pool for "+j.seconds+" seconds");else toast("Simulation stopped");
+    setTimeout(poll,400);paintSim()}catch(e){toast("Failed: "+e.message)}}
+function paintSim(){
+  const b=$("simBtn");if(!b)return;clearTimeout(simTimer);
+  if(S.live.simulated&&!S._simEnd)S._simEnd=S.live.simulate_until*1000;
+  const left=S._simEnd?Math.ceil((S._simEnd-Date.now())/1000):0;
+  if(S.live.simulated||left>0){b.textContent=`Stop simulation (${Math.max(0,left)} s)`;simTimer=setTimeout(()=>{if(S._simEnd&&Date.now()>S._simEnd+1500){S._simEnd=0;poll()}paintSim()},500)}
+  else{b.textContent="Simulate pool problem";S._simEnd=0}}
+
+/* ---------- manual ---------- */
 async function go(m){busy(true);try{const d=$("dirRow").style.display!=="none"?$("dir").value:null;S=await api("api/set",{mode:m,color:$("col").value.slice(1),brightness:+$("bri").value,speed:+$("spd").value,direction:d});paintHero();toast(m==="Off"?"Lights off":"Applied "+m)}
   catch(e){toast("Failed: "+e.message)}finally{busy(false)}}
 
@@ -338,13 +517,24 @@ function fxControls(){
 /* ---------- settings ---------- */
 function fadeLabel(v){v=+v;return v===0?"off (instant)":v+" s"}
 function fillSettings(){const c=S.config;
-  $("aCol").value="#"+c.alert.color;$("aFx").innerHTML=S.alert_effects.map(e=>`<option ${e===c.alert.effect?"selected":""}>${e}</option>`).join("");
+  $("aCol").value="#"+c.alert.color;$("aFx").innerHTML=S.alert_effects.map(e=>`<option ${e===c.alert.effect?"selected":""}>${esc(e)}</option>`).join("");
   $("hCol").value="#"+c.health_color;
+  $("scCol").value="#"+c.scrub.color;$("scScope").value=c.scrub.scope;$("scP").value=c.scrub.period;$("scpv").textContent=c.scrub.period;
   $("sBri").value=c.brightness;$("sbv").textContent=c.brightness;$("sSm").value=c.smoothness;$("smv").textContent=c.smoothness;$("sIv").value=c.interval;$("iv").textContent=c.interval;
   $("sFd").value=c.fade;$("fdv").textContent=fadeLabel(c.fade);$("sRs").value=c.response;
-  $("qOn").checked=c.quiet.enabled;$("qS").value=c.quiet.start;$("qE").value=c.quiet.end;$("qA").value=c.quiet.action;$("qD").value=c.quiet.dim;$("qdv").textContent=c.quiet.dim}
+  $("qOn").checked=c.quiet.enabled;$("qS").value=c.quiet.start;$("qE").value=c.quiet.end;$("qA").value=c.quiet.action;$("qD").value=c.quiet.dim;$("qdv").textContent=c.quiet.dim;
+  const z=(S.zones||[]).find(z=>srcOf(z.name)==="push")||(S.zones||[])[0];
+  $("pushEx").textContent=`curl -X POST ${location.origin}/api/push \\\n  -H 'Content-Type: application/json' \\${S.push_token?"\n  -H 'Authorization: Bearer $NASL_PUSH_TOKEN' \\":""}\n  -d '{"zone": "${z?z.name:"*"}", "value": 72}'`;
+  $("pushHint").innerHTML=`Also: <code>"color": "FF00AA"</code>, <code>"pulse": true</code>, <code>"ttl": 300</code> (seconds until it clears), <code>"clear": true</code>. Use <code>"zone": "*"</code> for every pushed zone.`+(S.push_token?" A push token is set.":" Set <code>NASL_PUSH_TOKEN</code> to require a token.")}
+function paintZpool(){
+  const e=$("zpoolLine");if(!e)return;const st=S.live.zpool_file,sc=scanText();
+  e.className="status-line"+(st&&st!=="ok"?" bad":"");
+  e.innerHTML=st==="ok"?`Pool status file: <b>${sc.length?esc(sc.join(", ")):"no scrub running"}</b>`
+    :st==="stale"?`Pool status file: <b>out of date</b>. Is the cron job still running?`
+    :`Pool status file: <b>not set up</b>. Scrubs are detected from <code>${esc(S.zpool_status_file)}</code>; see the README.`}
 async function saveSettings(){busy(true);try{
   S=await api("api/config",{alert:{color:$("aCol").value.slice(1),effect:$("aFx").value},health_color:$("hCol").value.slice(1),
+    scrub:{color:$("scCol").value.slice(1),scope:$("scScope").value,period:+$("scP").value},
     brightness:+$("sBri").value,smoothness:+$("sSm").value,interval:+$("sIv").value,fade:+$("sFd").value,response:$("sRs").value,
     quiet:{enabled:$("qOn").checked,start:$("qS").value,end:$("qE").value,action:$("qA").value,dim:+$("qD").value}});
   fillSettings();paintHero();toast("Settings saved")}catch(e){toast("Not saved: "+e.message)}finally{busy(false)}}
@@ -352,13 +542,14 @@ async function saveSettings(){busy(true);try{
 /* ---------- boot ---------- */
 async function load(){try{S=await api("api/state");
   $("sw").innerHTML=QUICK.map(c=>`<button class="sw" style="background:#${c}" title="#${c}" onclick="col.value='#${c}';go('Static')"></button>`).join("");
-  $("mode").innerHTML=S.modes.filter(m=>m!=="Direct").map(m=>`<option ${m===S.current?"selected":""}>${m}</option>`).join("");
+  $("mode").innerHTML=S.modes.filter(m=>m!=="Direct").map(m=>`<option ${m===S.current?"selected":""}>${esc(m)}</option>`).join("");
   $("col").value="#"+S.color;$("bri").value=S.brightness;$("bv").textContent=S.brightness;
   const sp=(S.effects&&S.effects.speed_pct!=null)?S.effects.speed_pct:(S.speed??50);$("spd").value=sp;$("sv").textContent=sp;fxControls();
-  fillSettings();openScale(S.status_mode);paintHero();
-  $("foot").innerHTML=`NAS Lights ${S.version} · ${S.live.net_iface?"network: "+S.live.net_iface+" · ":""}${S.live.cpu_sensor?"cpu: "+S.live.cpu_sensor+" · ":""}<a href="https://github.com/JohnLHolloway/nas-lights" target="_blank" rel="noopener">GitHub</a>`}catch(e){$("heroBig").textContent="Offline";$("heroSub").textContent="Could not reach the lights server."}}
-async function poll(){if(!S)return;try{const j=await api("api/live");S.live=j.live;S.status_mode=j.status_mode;paintHero()}catch(e){}}
-load();setInterval(poll,4000);
+  const firstScaled=(S.zones||[]).map(z=>srcOf(z.name)).find(s=>s in S.config.scales);
+  fillSettings();openScale(firstScaled||"drive_temp");paintHero();
+  const L=S.live;$("foot").innerHTML=`NAS Lights ${S.version}${S.device?" · "+esc(S.device):""} · ${L.net_iface?"network: "+esc(L.net_iface)+" · ":""}${L.cpu_sensor?"cpu: "+esc(L.cpu_sensor)+" · ":""}${L.disks&&L.disks.length?"disks: "+L.disks.length+" · ":""}<a href="https://github.com/JohnLHolloway/nas-lights" target="_blank" rel="noopener">GitHub</a>`}catch(e){$("heroBig").textContent="Offline";$("heroSub").textContent="Could not reach the lights server."}}
+async function poll(){if(!S)return;try{const j=await api("api/live");S.live=j.live;S.status_mode=j.status_mode;S.zone_sources=j.zone_sources;S.push=j.push;paintHero()}catch(e){}}
+load();setInterval(poll,3000);
 </script>
 </body>
 </html>

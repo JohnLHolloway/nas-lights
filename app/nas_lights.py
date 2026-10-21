@@ -2,14 +2,20 @@
 """NAS Lights: a web UI and status-light engine for OpenRGB.
 
 Talks to an OpenRGB SDK server over the network (no OpenRGB install needed in
-this container) and maps live NAS readings to light colors:
+this container) and maps live NAS readings to light colors, one source per
+OpenRGB zone:
 
   * hottest drive temperature   (Linux drivetemp hwmon)
   * CPU temperature             (k10temp / coretemp / zenpower hwmon)
   * network throughput          (host NIC counters)
+  * disk throughput             (/proc/diskstats)
   * ZFS pool health             (/proc/spl/kstat/zfs/*/state)
+  * a value pushed over HTTP    (Home Assistant, scripts)
 
-Any ZFS pool that is not ONLINE overrides status colors with an alert style.
+A scrub or resilver (read from a `zpool status` file, see README.md) makes the
+lights pulse slowly. Any ZFS pool that is not ONLINE overrides status colors
+with an alert style.
+
 The last manual setting is stored in NAS Lights' own settings file and is
 re-applied on startup and whenever the OpenRGB server comes back after a restart.
 (OpenRGB servers ignore profile-save requests from network clients.)
@@ -19,6 +25,7 @@ Standard library only.
 """
 import copy
 import glob
+import hmac
 import json
 import math
 import os
@@ -30,7 +37,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import sdk
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 
 # ---------------------------------------------------------------- configuration
@@ -46,34 +53,49 @@ OPENRGB_PORT = int(env("OPENRGB_PORT", "6742"))
 OPENRGB_DEVICE = env("OPENRGB_DEVICE", "0")          # index, or part of the device name
 DATA_DIR = env("NASL_DATA", "/data")
 HOST_SYS = env("HOST_SYS", "/host/sys" if os.path.isdir("/host/sys/class") else "/sys")
+HOST_PROC = env("HOST_PROC", "/proc")
 ZFS_KSTAT = env("ZFS_KSTAT", "/proc/spl/kstat/zfs")
+ZPOOL_STATUS_FILE = env("ZPOOL_STATUS_FILE", "/host/zfs/zpool-status.txt")
 NET_IFACE = env("NET_IFACE", "")                     # empty = auto-detect
 CPU_SENSOR = env("CPU_SENSOR", "")                   # empty = auto-detect
 DRIVE_SENSOR = env("DRIVE_SENSOR", "drivetemp")
+DISK_DEVICES = env("DISK_DEVICES", "")               # empty = every physical disk
+PUSH_TOKEN = env("NASL_PUSH_TOKEN", "")              # optional bearer token for /api/push
 STATE_FILE = os.path.join(DATA_DIR, "settings.json")
 
 LOCK = threading.RLock()
+WAKE = threading.Event()                             # set to make the status loop run now
 HEX = re.compile(r"^[0-9A-Fa-f]{6}$")
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
-STATUS_MODES = {
-    "none": "Manual (no status)",
+SOURCES = {
+    "off": "Off",
     "drive_temp": "Hottest drive temperature",
     "cpu_temp": "CPU temperature",
     "network": "Network activity",
-    "health": "Health only",
+    "disk_io": "Disk throughput",
+    "health": "Pool health",
+    "push": "Pushed value",
 }
-UNITS = {"drive_temp": "°C", "cpu_temp": "°C", "network": "Mbps"}
-LIMITS = {"drive_temp": (0, 80), "cpu_temp": (0, 110), "network": (0, 100000)}
+SCALED = ("drive_temp", "cpu_temp", "network", "disk_io", "push")
+LOG_SCALES = ("network", "disk_io")
+UNITS = {"drive_temp": "°C", "cpu_temp": "°C", "network": "Mbps", "disk_io": "MB/s", "push": ""}
+LIMITS = {"drive_temp": (0, 80), "cpu_temp": (0, 110), "network": (0, 100000), "disk_io": (0, 100000),
+          "push": (-100000, 100000)}
+SIMULATE_SECONDS = 15
+PREVIEW_SECONDS = 15
 
 DEFAULT_CONFIG = {
     "scales": {
         "drive_temp": [[30, "0050FF"], [36, "00C8FF"], [42, "00E070"], [46, "FFD400"], [50, "FF7A00"], [55, "FF0000"]],
         "cpu_temp": [[35, "0050FF"], [45, "00C8FF"], [60, "00E070"], [72, "FFD400"], [80, "FF7A00"], [90, "FF0000"]],
         "network": [[1, "0050FF"], [10, "00C8FF"], [50, "00E070"], [200, "FFD400"], [500, "FF7A00"], [900, "FF0000"]],
+        "disk_io": [[1, "0050FF"], [10, "00C8FF"], [50, "00E070"], [150, "FFD400"], [400, "FF7A00"], [1000, "FF0000"]],
+        "push": [[0, "0050FF"], [25, "00C8FF"], [50, "00E070"], [75, "FFD400"], [100, "FF0000"]],
     },
     "health_color": "00C853",
     "alert": {"color": "FF0000", "effect": "Breathing"},
+    "scrub": {"color": "5B6CFF", "scope": "all", "period": 6},   # scope: all, health or off
     "brightness": 100,
     "smoothness": 4,               # color steps between two scale points
     "interval": 5,                 # seconds between readings
@@ -95,18 +117,38 @@ def load_state():
     st.setdefault("speed", 50)
     st.setdefault("status_mode", "none")
     st.setdefault("manual", None)             # last manual effect, re-applied after restarts
+    migrate(st)
     cfg = copy.deepcopy(DEFAULT_CONFIG)
     for k, v in (st.get("config") or {}).items():
         if k in cfg:
             cfg[k] = v
+    for k, v in DEFAULT_CONFIG["scales"].items():  # scales added in later versions
+        cfg["scales"].setdefault(k, copy.deepcopy(v))
+    for k, v in DEFAULT_CONFIG["scrub"].items():
+        cfg["scrub"].setdefault(k, v)
     st["config"] = cfg
     return st
 
 
+def migrate(st):
+    """0.2 drove the whole device from one `status_mode` reading. 0.3 maps a
+    source to each zone: `zones` holds zone name -> source, with "*" for every
+    zone not listed, and `status_mode` is just "none" (manual) or "zones"."""
+    if isinstance(st.get("zones"), dict):
+        if st["status_mode"] not in ("none", "zones"):
+            st["status_mode"] = "zones"
+        return
+    legacy = st.get("status_mode", "none")
+    st["zones"] = {"*": legacy if legacy in SOURCES and legacy != "off" else "drive_temp"}
+    st["status_mode"] = "none" if legacy not in SOURCES else "zones"
+
+
 STATE = load_state()
-LIVE = {"reading": None, "unit": "", "applied": None, "pools": {}, "alert": False, "quiet": False,
-        "preview_until": 0, "readings": {}, "net_iface": None, "cpu_sensor": None, "error": None,
+LIVE = {"readings": {}, "raw": {}, "pools": {}, "scans": {}, "zpool_file": None, "alert": False,
+        "simulated": False, "simulate_until": 0, "quiet": False, "scrubbing": False, "preview_until": 0,
+        "zones": [], "effect": None, "net_iface": None, "cpu_sensor": None, "disks": [], "error": None,
         "writes": {"mode": 0, "colors": 0, "fades": 0}}   # write counters, for diagnostics
+PUSH = {}                                                  # zone name (lowercase) or "*" -> pushed value
 
 
 def save_state():
@@ -118,6 +160,11 @@ def save_state():
         os.replace(tmp, STATE_FILE)
     except OSError as e:
         LIVE["error"] = f"could not save settings: {e}"
+
+
+def zone_source(name):
+    z = STATE["zones"]
+    return z.get(name, z.get("*", "off"))
 
 
 # ---------------------------------------------------------------- OpenRGB
@@ -135,8 +182,15 @@ def device_index(c):
     raise LookupError(f"no OpenRGB device matches '{OPENRGB_DEVICE}'")
 
 
+def device_zones(ctl):
+    """The controller's zones. A device without zones is treated as one zone."""
+    if ctl["zones"]:
+        return ctl["zones"]
+    return [{"index": 0, "name": ctl["name"], "leds_count": len(ctl["leds"]), "start": 0, "whole": True}]
+
+
 def controller_info():
-    """Device name, effect list with capabilities, and the live effect."""
+    """Device name, zones, effect list with capabilities, and the live effect."""
     with connect() as c:
         idx = device_index(c)
         ctl = c.controller(idx)
@@ -147,6 +201,7 @@ def controller_info():
         speed_pct = round((cur["speed"] - cur["speed_min"]) * 100 / (cur["speed_max"] - cur["speed_min"]))
     return {
         "device": ctl["name"],
+        "zones": [{"index": z["index"], "name": z["name"], "leds": z["leds_count"]} for z in device_zones(ctl)],
         "modes": [m["name"] for m in modes],
         "current": cur["name"] if cur else None,
         "effects": {"caps": {m["name"]: sdk.capabilities(m) for m in modes}, "current": cur["name"] if cur else None,
@@ -158,7 +213,7 @@ def dim(color, brightness):
     """Software brightness: scale the color (for effects without hardware brightness)."""
     if not color or brightness is None:
         return color
-    f = max(0, min(100, int(brightness))) / 100.0
+    f = max(0.0, min(100.0, float(brightness))) / 100.0
     return "".join(f"{round(int(color[k:k + 2], 16) * f):02X}" for k in (0, 2, 4))
 
 
@@ -166,7 +221,7 @@ def _scale(pct, lo, hi):
     return round(lo + (hi - lo) * max(0, min(100, pct)) / 100.0)
 
 
-FADE_FPS = 15
+FPS = 15
 MODE_FIELDS = ("speed", "brightness", "direction", "color_mode", "colors")
 
 
@@ -175,13 +230,21 @@ def _lerp(a, b, t):
     return "".join(f"{round(ca[k] + (cb[k] - ca[k]) * t):02X}" for k in range(3))
 
 
-def apply(mode, color=None, brightness=None, speed=None, direction=None, fade=0.0):
-    """Switch the device to an effect. Unsupported options are ignored.
+def _same_mode(ctl, m):
+    """True when the controller already runs mode `m` with the same settings."""
+    i = ctl["active_mode"]
+    if not 0 <= i < len(ctl["modes"]):
+        return False
+    active = ctl["modes"][i]
+    return active["index"] == m["index"] and all(active[f] == m[f] for f in MODE_FIELDS)
+
+
+def apply(mode, color=None, brightness=None, speed=None, direction=None):
+    """Switch the whole device to an effect (manual control). Unsupported options are ignored.
 
     The effect itself is only re-sent when something about it changes. Some
     controllers (ASRock Polychrome, for one) blank the LEDs for a moment on every
-    mode write, which shows up as a flash on each color update. When the effect
-    is unchanged and `fade` > 0, the color is blended over `fade` seconds.
+    mode write, which shows up as a flash on each color update.
     """
     with connect() as c:
         idx = device_index(c)
@@ -206,27 +269,15 @@ def apply(mode, color=None, brightness=None, speed=None, direction=None, fade=0.
         elif color and caps["per_led"]:
             m["color_mode"] = sdk.COLOR_MODE_PER_LED
 
-        active = ctl["modes"][ctl["active_mode"]] if 0 <= ctl["active_mode"] < len(ctl["modes"]) else None
-        same_mode = (active is not None and active["index"] == m["index"]
-                     and all(active[f] == m[f] for f in MODE_FIELDS))
+        same_mode = _same_mode(ctl, m)
         if not same_mode:
             c.update_mode(idx, m["index"], m)
             LIVE["writes"]["mode"] += 1
-
         if color and caps["per_led"] and not caps["mode_colors"] and ctl["leds"]:
-            n = len(ctl["leds"])
-            start = ctl["colors"][0] if (same_mode and ctl["colors"]) else None
-            if start and fade and fade > 0 and start != shown:
-                frames = max(2, int(fade * FADE_FPS))
-                for f in range(1, frames + 1):
-                    c.update_leds(idx, [_lerp(start, shown, f / frames)] * n)
-                    time.sleep(fade / frames)
-                LIVE["writes"]["fades"] += 1
-            else:
-                if not same_mode:
-                    time.sleep(0.05)
-                c.update_leds(idx, [shown] * n)
-                LIVE["writes"]["colors"] += 1
+            if not same_mode:
+                time.sleep(0.05)
+            c.update_leds(idx, [shown] * len(ctl["leds"]))
+            LIVE["writes"]["colors"] += 1
         time.sleep(0.1)                          # let the server finish before the socket closes
 
 
@@ -237,17 +288,183 @@ def restore_manual():
         apply(m["mode"], m.get("color"), m.get("brightness"), m.get("speed"), m.get("direction"))
 
 
-def color_effect(preferred):
-    """Pick a usable color effect name: the preferred one, else Static/Direct."""
-    try:
-        caps = controller_info()["effects"]["caps"]
-    except Exception:
-        return preferred
+def pick_color_mode(modes, preferred):
+    """A mode that can show a color: the preferred one, else Static, else Direct."""
     for name in (preferred, "Static", "Direct"):
-        for k, v in caps.items():
-            if k.lower() == name.lower() and (v["per_led"] or v["mode_colors"]):
-                return k
-    return preferred
+        for m in modes:
+            caps = sdk.capabilities(m)
+            if m["name"].lower() == str(name).lower() and (caps["per_led"] or caps["mode_colors"]):
+                return m
+    return None
+
+
+def _mul(color, f):
+    return "".join(f"{round(int(color[k:k + 2], 16) * f):02X}" for k in (0, 2, 4))
+
+
+def _ease(t):
+    return t * t * (3 - 2 * t)
+
+
+class Renderer:
+    """Drives the lights while status lights, a preview or a simulated alert are showing.
+
+    The status loop hands it a target every few seconds: an effect name, plus a
+    color and a pulse flag per zone. The renderer keeps one SDK connection open
+    and, about 15 times a second, works out each zone's color (fading from the
+    old color, pulsing during a scrub) and sends UPDATEZONELEDS only for zones
+    whose color actually changed. The effect is written only when it differs from
+    what the controller reports, so a steady status never re-sends the mode.
+    """
+
+    REFRESH = 30          # seconds between re-reading the controller, to notice outside changes
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.target = None
+        self.cur = {}         # zone index -> [from color or None, to color, start time, fade seconds]
+        self.written = {}     # zone index -> color last sent
+        self.conn = self.ctl = self.idx = None
+        self.read_at = 0
+        self.error = None
+
+    @property
+    def active(self):
+        return self.target is not None
+
+    def show(self, target):
+        """target: {"effect": name, "colors": [hex or None per zone], "pulse": [bool], "fade": s, "period": s}.
+        A color of None leaves that zone as it is (no reading yet)."""
+        now = time.monotonic()
+        with self.lock:
+            changed = self.target is None or self.target["effect"] != target["effect"]
+            for zi, col in enumerate(target["colors"]):
+                if col is None:
+                    continue
+                prev = self.cur.get(zi)
+                if prev and prev[1] == col:
+                    continue
+                start = self._base(zi, now) if prev else None     # None: fade from what the LEDs show
+                self.cur[zi] = [start, col, now, 0.0 if changed else float(target.get("fade", 0))]
+                if prev and self.cur[zi][3] > 0:
+                    LIVE["writes"]["fades"] += 1
+            self.target = target
+
+    def release(self):
+        """Stop driving the lights (manual control takes over)."""
+        with self.lock:
+            self.target = None
+            self.cur, self.written = {}, {}
+            self._close()
+
+    def reconnect(self):
+        """Re-read the controller and rewrite every zone (after an OpenRGB restart)."""
+        with self.lock:
+            self._close()
+
+    def _close(self):
+        if self.conn:
+            self.conn.close()
+        self.conn = self.ctl = None
+
+    def _base(self, zi, now):
+        fr, to, t0, dur = self.cur[zi]
+        if fr is None or dur <= 0 or now - t0 >= dur:
+            return to
+        return _lerp(fr, to, _ease((now - t0) / dur))
+
+    def _read(self):
+        self.ctl = self.conn.controller(self.idx)
+        self.read_at = time.monotonic()
+        # Start from what the LEDs really show, so a zone that already has the right color is
+        # not rewritten, and one changed from outside (another client, an OpenRGB restart) is.
+        cols = self.ctl["colors"]
+        self.written = {z["index"]: cols[z["start"]] for z in device_zones(self.ctl) if z["start"] < len(cols)}
+
+    def frame(self):
+        with LOCK:
+            with self.lock:
+                t = self.target
+                if t is None:
+                    return
+                if self.conn is None:
+                    self.conn = connect()
+                    self.idx = device_index(self.conn)
+                    self._read()
+                elif time.monotonic() - self.read_at > self.REFRESH:
+                    self._read()
+                ctl, now = self.ctl, time.monotonic()
+                zones = device_zones(ctl)
+                m = pick_color_mode(ctl["modes"], t["effect"])
+                if m is None:
+                    raise ValueError(f"{ctl['name']} has no effect that can show a color")
+                caps = sdk.capabilities(m)
+                per_led = caps["per_led"] and not caps["mode_colors"]
+                m = copy.deepcopy(m)
+                same_effect = _same_mode(ctl, {**m, "color_mode": sdk.COLOR_MODE_PER_LED} if per_led else m)
+                for zi, entry in self.cur.items():           # resolve "fade from what's showing"
+                    if entry[0] is None:
+                        z = zones[zi] if zi < len(zones) else None
+                        live = ctl["colors"][z["start"]] if (z and same_effect and ctl["colors"]) else "000000"
+                        entry[0], entry[2] = live, now
+                        entry[3] = float(t.get("fade", 0)) if same_effect else 0.0
+                period = max(1.0, float(t.get("period", 6)))
+                pulse_f = 0.3 + 0.7 * (0.5 + 0.5 * math.cos(2 * math.pi * (time.time() % period) / period))
+                want = {}
+                for z in zones:
+                    zi = z["index"]
+                    if zi in self.cur:
+                        c = self._base(zi, now)
+                        if zi < len(t["pulse"]) and t["pulse"][zi]:
+                            c = _mul(c, pulse_f)
+                        want[zi] = c
+
+                if per_led:
+                    m["color_mode"] = sdk.COLOR_MODE_PER_LED
+                else:                                         # one color for the device, set through the mode
+                    first = next((self.cur[k][1] for k in sorted(self.cur)), "000000")
+                    m["color_mode"] = sdk.COLOR_MODE_SPECIFIC
+                    m["colors"] = [first] * max(1, m["colors_min"])
+                if not _same_mode(ctl, m):
+                    self.conn.update_mode(self.idx, m["index"], m)
+                    LIVE["writes"]["mode"] += 1
+                    ctl["modes"][m["index"]] = m
+                    ctl["active_mode"] = m["index"]
+                    self.written = {}
+                    time.sleep(0.05)
+                LIVE["effect"] = m["name"]
+                if not per_led:
+                    return
+                for z in zones:
+                    zi = z["index"]
+                    c = want.get(zi)
+                    if c is None or self.written.get(zi) == c:
+                        continue
+                    if z.get("whole"):
+                        self.conn.update_leds(self.idx, [c] * z["leds_count"])
+                    else:
+                        self.conn.update_zone_leds(self.idx, zi, [c] * z["leds_count"])
+                    self.written[zi] = c
+                    LIVE["writes"]["colors"] += 1
+
+    def run(self):
+        while True:
+            if self.target is None:
+                time.sleep(0.2)
+                continue
+            try:
+                self.frame()
+                self.error = None
+            except Exception as e:                            # reconnect on the next frame
+                self.error = str(e)[:200]
+                with self.lock:
+                    self._close()
+                time.sleep(2)
+                continue
+            time.sleep(1.0 / FPS)
+
+
+RENDER = Renderer()
 
 
 # ---------------------------------------------------------------- readings
@@ -351,14 +568,95 @@ def net_mbps():
     return rate
 
 
+# Whole physical disks. Partitions, loop and RAM devices, zvols (zd*), device-mapper
+# and md arrays are skipped so nothing is counted twice.
+DISK_NAME = re.compile(r"^(sd[a-z]+|nvme\d+n\d+|vd[a-z]+|xvd[a-z]+|hd[a-z]+|mmcblk\d+)$")
+_disk = {"prev": None}
+
+
+def disk_names(stats):
+    if DISK_DEVICES:
+        want = {d.strip() for d in DISK_DEVICES.split(",") if d.strip()}
+        return sorted(n for n in stats if n in want)
+    try:                                                   # /sys/block lists whole devices only
+        whole = set(os.listdir(os.path.join(HOST_SYS, "block")))
+    except OSError:
+        whole = None
+    return sorted(n for n in stats if DISK_NAME.match(n) and (whole is None or n in whole))
+
+
+def diskstats():
+    """Bytes read + written per block device since boot, from /proc/diskstats."""
+    out = {}
+    with open(os.path.join(HOST_PROC, "diskstats")) as f:
+        for line in f:
+            p = line.split()
+            if len(p) >= 10:
+                out[p[2]] = (int(p[5]) + int(p[9])) * 512     # sectors are always 512 bytes here
+    return out
+
+
+def disk_mbps():
+    """Disk throughput (read + write, all physical disks) since the previous call, in MB/s."""
+    try:
+        stats = diskstats()
+    except (OSError, ValueError):
+        return None
+    names = disk_names(stats)
+    LIVE["disks"] = names
+    if not names:
+        return None
+    total, now = sum(stats[n] for n in names), time.monotonic()
+    rate = None
+    prev = _disk["prev"]
+    if prev and prev[2] == names and now > prev[0]:
+        rate = max(0.0, (total - prev[1]) / (now - prev[0]) / 1e6)
+    _disk["prev"] = (now, total, names)
+    return rate
+
+
 def pool_states():
     out = {}
     for p in glob.glob(os.path.join(ZFS_KSTAT, "*/state")):
         try:
-            out[p.split("/")[-2]] = _read(p)
+            out[p.replace("\\", "/").split("/")[-2]] = _read(p)
         except OSError:
             pass
     return out
+
+
+ZPOOL_STALE = 15 * 60
+SCAN_ACTIVE = re.compile(r"^\s*scan:\s*(scrub|resilver) in progress", re.M)
+SCAN_PCT = re.compile(r"([\d.]+)% done")
+
+
+def parse_zpool_status(text):
+    """Pool states and running scans from `zpool status` output.
+
+    Returns {pool: {"state": str, "scan": "scrub" | "resilver" | None, "percent": float | None}}.
+    """
+    pools = {}
+    for block in re.split(r"^\s*pool:\s*", text, flags=re.M)[1:]:
+        name = block.split("\n", 1)[0].strip()
+        st = re.search(r"^\s*state:\s*(\S+)", block, re.M)
+        scan = SCAN_ACTIVE.search(block)
+        pct = SCAN_PCT.search(block) if scan else None
+        pools[name] = {"state": st.group(1) if st else "UNKNOWN", "scan": scan.group(1) if scan else None,
+                       "percent": float(pct.group(1)) if pct else None}
+    return pools
+
+
+def zpool_file():
+    """Read ZPOOL_STATUS_FILE. Returns (pools, status) with status ok, missing or stale."""
+    try:
+        age = time.time() - os.path.getmtime(ZPOOL_STATUS_FILE)
+        with open(ZPOOL_STATUS_FILE, encoding="utf-8", errors="replace") as f:
+            text = f.read(1 << 20)
+    except OSError:
+        return {}, "missing"
+    if age > ZPOOL_STALE:
+        return {}, "stale"
+    return parse_zpool_status(text), "ok"
 
 
 RESPONSE_TAU = {"fast": 0.0, "normal": 15.0, "slow": 45.0}   # smoothing time constant, seconds
@@ -382,13 +680,23 @@ def smooth(key, value):
 
 
 def readings():
-    raw = {"drive_temp": drive_temp(), "cpu_temp": cpu_temp(), "network": net_mbps()}
+    raw = {"drive_temp": drive_temp(), "cpu_temp": cpu_temp(), "network": net_mbps(), "disk_io": disk_mbps()}
     out = {}
     for k, v in raw.items():
         sv = smooth(k, v)
         out[k] = round(sv, 1) if sv is not None else None
     LIVE["raw"] = {k: (round(v, 1) if v is not None else None) for k, v in raw.items()}
     return out
+
+
+# ---------------------------------------------------------------- push values
+def push_entry(zone_name):
+    """The value pushed for a zone (or for every zone), unless it has expired."""
+    for key in (zone_name.lower(), "*"):
+        e = PUSH.get(key)
+        if e and (not e["until"] or time.time() < e["until"]):
+            return e
+    return None
 
 
 # ---------------------------------------------------------------- color math
@@ -399,7 +707,7 @@ def _rgb(h):
 def _scale_pos(mode, value):
     """Where a value sits on a scale, as stop index + fraction (0 .. len(stops)-1)."""
     stops = sorted(STATE["config"]["scales"][mode], key=lambda s: s[0])
-    f = (lambda v: math.log10(max(float(v), 0.1))) if mode == "network" else float
+    f = (lambda v: math.log10(max(float(v), 0.1))) if mode in LOG_SCALES else float
     x = f(value)
     pts = [f(s[0]) for s in stops]
     if len(pts) == 1 or x <= pts[0]:
@@ -457,6 +765,52 @@ def in_quiet_hours():
 
 
 # ---------------------------------------------------------------- engine
+def zone_color(src, zone_name, vals, scrubbing):
+    """(color, pulse, value) for one zone. color None means no reading yet."""
+    cfg = STATE["config"]
+    scrub = cfg["scrub"]
+    pulse = scrubbing and scrub["scope"] == "all" and src != "off"
+    if src == "off":
+        return "000000", False, None
+    if src == "health":
+        if scrubbing and scrub["scope"] in ("all", "health"):
+            return scrub["color"], True, None
+        return cfg["health_color"], False, None
+    if src == "push":
+        e = push_entry(zone_name)
+        if e is None:
+            return "000000", False, None
+        col = e["color"] or scale_color("push", e["value"])
+        return col, pulse or e["pulse"], e["value"]
+    v = vals.get(src)
+    if v is None:
+        return None, pulse, None
+    return status_color(src, v), pulse, v
+
+
+def build_target(zones, vals, alert, quiet, scrubbing):
+    """What the lights should show now: an effect plus a color and pulse per zone."""
+    cfg = STATE["config"]
+    bri = int(cfg.get("brightness", 100))
+    effect, colors, pulse, info = "Static", [], [], []
+    for z in zones:
+        src = zone_source(z["name"])
+        if alert:                                   # problems always show, on every zone, even in quiet hours
+            col, pul, val = cfg["alert"]["color"], False, None
+            effect = cfg["alert"]["effect"]
+        elif quiet and cfg["quiet"]["action"] == "off":
+            col, pul, val = "000000", False, None
+        else:
+            col, pul, val = zone_color(src, z["name"], vals, scrubbing)
+        b = int(cfg["quiet"].get("dim", 15)) if (quiet and not alert) else bri
+        colors.append(dim(col, b) if col else None)
+        pulse.append(pul)
+        info.append({"index": z["index"], "name": z["name"], "leds": z["leds"], "source": src,
+                     "color": col, "pulse": pul, "value": val})
+    return {"effect": effect, "colors": colors, "pulse": pulse, "fade": float(cfg.get("fade", 1.5)),
+            "period": float(cfg["scrub"].get("period", 6))}, info
+
+
 class ServerWatch:
     """Holds one idle SDK connection so an OpenRGB restart is noticed immediately.
 
@@ -499,56 +853,58 @@ class ServerWatch:
 
 def status_loop():
     watch = ServerWatch()
+    zones = []
     while True:
         cfg = STATE["config"]
         try:
-            mode = STATE.get("status_mode", "none")
-            if watch.changed():                             # startup, or OpenRGB came back
-                time.sleep(1.0)
-                with LOCK:
-                    LIVE["applied"] = None
-                    if mode == "none" and not LIVE["preview_until"]:
-                        restore_manual()
+            fresh = watch.changed()
+            if fresh or not zones:                          # startup, or OpenRGB came back
+                if fresh:
+                    time.sleep(1.0)
+                zones = controller_info()["zones"]
+                if fresh:
+                    RENDER.reconnect()
+                    with LOCK:
+                        if STATE["status_mode"] == "none" and not RENDER.active:
+                            restore_manual()
 
             pools = pool_states()
+            zfile, LIVE["zpool_file"] = zpool_file()
+            for name, p in zfile.items():
+                pools.setdefault(name, p["state"])
+            scans = {k: {"kind": p["scan"], "percent": p["percent"]} for k, p in zfile.items() if p["scan"]}
+            now = time.time()
+            simulated = now < LIVE["simulate_until"]
+            if simulated:
+                pools["simulated"] = "DEGRADED"
             vals = readings()
             alert = any(s != "ONLINE" for s in pools.values())
             quiet = in_quiet_hours()
-            LIVE.update(pools=pools, alert=alert, quiet=quiet, readings=vals,
-                        reading=vals.get(mode), unit=UNITS.get(mode, ""))
+            LIVE.update(pools=pools, scans=scans, scrubbing=bool(scans), alert=alert, simulated=simulated,
+                        quiet=quiet, readings=vals)
 
-            if mode == "none" and LIVE["preview_until"] and time.time() >= LIVE["preview_until"]:
-                with LOCK:                                  # preview over: restore the manual setting
-                    if STATE.get("status_mode") == "none":
-                        restore_manual()
+            target, info = build_target(zones, vals, alert, quiet, bool(scans))
+            LIVE["zones"] = info
+            if now < LIVE["preview_until"]:
+                pass                                        # a preview owns the lights for now
+            elif STATE["status_mode"] != "none" or simulated:
+                RENDER.show(target)
+            elif RENDER.active:                             # preview or simulation over in manual mode
+                with LOCK:
+                    RENDER.release()
                     LIVE["preview_until"] = 0
-
-            if mode != "none" and time.time() >= LIVE["preview_until"]:
-                bri = int(cfg.get("brightness", 100))
-                if alert:                                   # problems always show, even in quiet hours
-                    target = [cfg["alert"]["effect"], cfg["alert"]["color"], bri]
-                elif quiet and cfg["quiet"]["action"] == "off":
-                    target = ["Off", None, None]
-                else:
-                    if quiet:
-                        bri = int(cfg["quiet"].get("dim", 15))
-                    if mode == "health":
-                        target = ["Static", cfg["health_color"], bri]
-                    elif LIVE["reading"] is not None:
-                        target = ["Static", status_color(mode, LIVE["reading"]), bri]
-                    else:
-                        target = None
-                if target and target != LIVE["applied"]:
-                    with LOCK:
-                        if STATE.get("status_mode") == mode:
-                            eff = target[0] if target[0] == "Off" else color_effect(target[0])
-                            apply(eff, target[1], target[2], fade=float(cfg.get("fade", 1.5)))
-                            LIVE["applied"] = target
-            LIVE["error"] = None
+                    if STATE["status_mode"] == "none":
+                        restore_manual()
+            LIVE["error"] = RENDER.error if RENDER.active else None
         except Exception as e:                              # keep running; show the problem in the UI
             LIVE["error"] = str(e)[:200]
-            LIVE["applied"] = None
-        time.sleep(max(2, int(cfg.get("interval", 5))))
+            zones = []
+        wait = max(2, int(cfg.get("interval", 5)))
+        for until in (LIVE["preview_until"], LIVE["simulate_until"]):
+            if until > time.time():
+                wait = min(wait, until - time.time() + 0.05)
+        WAKE.wait(wait)
+        WAKE.clear()
 
 
 # ---------------------------------------------------------------- validation
@@ -565,13 +921,13 @@ def clean_config(c):
             for v, col in stops:
                 v = float(v)
                 if not lo <= v <= hi:
-                    raise ValueError(f"{STATUS_MODES[mode]}: {v:g} is outside {lo}-{hi}")
+                    raise ValueError(f"{SOURCES[mode]}: {v:g} is outside {lo}-{hi}")
                 if not HEX.match(str(col)):
                     raise ValueError("bad color " + str(col))
                 cleaned.append([round(v, 1), str(col).upper()])
             cleaned.sort(key=lambda s: s[0])
             if len({s[0] for s in cleaned}) != len(cleaned):
-                raise ValueError(f"{STATUS_MODES[mode]}: two points share the same value")
+                raise ValueError(f"{SOURCES[mode]}: two points share the same value")
             out["scales"][mode] = cleaned
     if "health_color" in c:
         if not HEX.match(str(c["health_color"])):
@@ -582,6 +938,14 @@ def clean_config(c):
         if not HEX.match(str(a.get("color", ""))) or not str(a.get("effect", "")).strip():
             raise ValueError("bad alert style")
         out["alert"] = {"color": a["color"].upper(), "effect": str(a["effect"])[:40]}
+    if "scrub" in c:
+        s = c["scrub"]
+        if not HEX.match(str(s.get("color", ""))):
+            raise ValueError("bad scrub color")
+        if s.get("scope") not in ("all", "health", "off"):
+            raise ValueError("scrub scope must be all, health or off")
+        out["scrub"] = {"color": s["color"].upper(), "scope": s["scope"],
+                        "period": max(2, min(20, int(s.get("period", 6))))}
     if "brightness" in c:
         out["brightness"] = max(0, min(100, int(c["brightness"])))
     if "smoothness" in c:
@@ -605,9 +969,27 @@ def clean_config(c):
     return out
 
 
+def clean_zones(z):
+    if not isinstance(z, dict) or not 1 <= len(z) <= 64:
+        raise ValueError("zones must map zone names to sources")
+    out = {}
+    for name, src in z.items():
+        name = str(name)[:80]
+        if src not in SOURCES:
+            raise ValueError(f"unknown source '{src}' for {name}")
+        out[name] = src
+    out.setdefault("*", "off")
+    return out
+
+
 # ---------------------------------------------------------------- web
 HERE = os.path.dirname(os.path.abspath(__file__))
 PAGE_FILE = os.path.join(HERE, "index.html")
+
+
+def live_state():
+    return {"status_mode": STATE["status_mode"], "zone_sources": STATE["zones"], "live": LIVE,
+            "push": {k: v for k, v in PUSH.items()}}
 
 
 def full_state():
@@ -615,13 +997,14 @@ def full_state():
         info = controller_info()
         info["openrgb_error"] = None
     except Exception as e:
-        info = {"device": None, "modes": [], "current": None,
+        info = {"device": None, "zones": [], "modes": [], "current": None,
                 "effects": {"caps": {}, "current": None, "speed_pct": None},
                 "openrgb_error": f"Cannot reach OpenRGB at {OPENRGB_HOST}:{OPENRGB_PORT} ({e})"}
     alert_effects = [k for k, v in info["effects"]["caps"].items() if (v["per_led"] or v["mode_colors"]) and k != "Direct"]
-    return {**info, **STATE, "status_modes": STATUS_MODES, "units": UNITS, "limits": LIMITS,
-            "alert_effects": alert_effects or ["Static"], "defaults": DEFAULT_CONFIG, "live": LIVE,
-            "version": __version__}
+    settings = {k: v for k, v in STATE.items() if k != "zones"}   # the mapping is sent as zone_sources
+    return {**settings, **info, **live_state(), "sources": SOURCES, "units": UNITS, "limits": LIMITS,
+            "log_scales": LOG_SCALES, "alert_effects": alert_effects or ["Static"], "defaults": DEFAULT_CONFIG,
+            "push_token": bool(PUSH_TOKEN), "zpool_status_file": ZPOOL_STATUS_FILE, "version": __version__}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -659,7 +1042,7 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 return self._json_out(200, full_state())
         if path == "/api/live":
-            return self._json_out(200, {"status_mode": STATE["status_mode"], "live": LIVE})
+            return self._json_out(200, live_state())
         if path == "/healthz":
             return self._json_out(200, {"ok": True, "version": __version__})
         return self._err(404, "not found")
@@ -672,32 +1055,57 @@ class Handler(BaseHTTPRequestHandler):
             req = self._body()
         except ValueError:
             return self._err(400, "bad JSON")
+        if not isinstance(req, dict):
+            return self._err(400, "send a JSON object")
         path = self.path.split("?")[0]
         try:
             if path == "/api/status":
                 return self._set_status(req)
+            if path == "/api/zones":
+                return self._set_zones(req)
             if path == "/api/config":
                 return self._set_config(req)
             if path == "/api/preview":
                 return self._preview(req)
+            if path == "/api/simulate":
+                return self._simulate(req)
+            if path == "/api/push":
+                return self._push(req)
             if path == "/api/set":
                 return self._set_manual(req)
         except (ConnectionError, OSError) as e:
             return self._err(502, f"OpenRGB unreachable: {e}")
-        except (ValueError, LookupError) as e:
+        except (ValueError, LookupError, TypeError) as e:
             return self._err(400, str(e))
         return self._err(404, "not found")
 
+    def _status_changed(self):
+        LIVE["preview_until"] = 0
+        save_state()
+        WAKE.set()
+
     def _set_status(self, req):
+        """"none" for manual, "zones" for the per-zone mapping, or a source for every zone (0.2 style)."""
         k = str(req.get("status_mode", ""))
-        if k not in STATUS_MODES:
+        if k not in SOURCES and k not in ("none", "zones"):
             return self._err(400, "unknown status mode")
         with LOCK:
-            STATE["status_mode"] = k
-            LIVE.update(applied=None, preview_until=0)
-            save_state()
+            if k in SOURCES:
+                STATE["zones"] = {"*": k}
+            STATE["status_mode"] = "none" if k == "none" else "zones"
+            self._status_changed()
             if k == "none":                               # back to the last manual setting
+                RENDER.release()
                 restore_manual()
+            return self._json_out(200, full_state())
+
+    def _set_zones(self, req):
+        zones = clean_zones(req.get("zones"))
+        with LOCK:
+            STATE["zones"] = zones
+            if req.get("enable", True):
+                STATE["status_mode"] = "zones"
+            self._status_changed()
             return self._json_out(200, full_state())
 
     def _set_config(self, req):
@@ -707,26 +1115,68 @@ class Handler(BaseHTTPRequestHandler):
             return self._err(400, f"bad settings: {e}")
         with LOCK:
             STATE["config"] = new
-            LIVE["applied"] = None
             save_state()
+            WAKE.set()
             return self._json_out(200, full_state())
 
     def _preview(self, req):
         mode = str(req.get("mode", ""))
         cfg = STATE["config"]
         if mode == "alert":
-            target = (color_effect(cfg["alert"]["effect"]), cfg["alert"]["color"])
+            effect, color = cfg["alert"]["effect"], cfg["alert"]["color"]
         elif mode == "health":
-            target = (color_effect("Static"), cfg["health_color"])
+            effect, color = "Static", cfg["health_color"]
         elif mode in DEFAULT_CONFIG["scales"]:
-            target = (color_effect("Static"), scale_color(mode, float(req.get("value"))))
+            effect, color = "Static", scale_color(mode, float(req.get("value")))
         else:
             return self._err(400, "unknown preview")
-        with LOCK:
-            apply(target[0], target[1], int(cfg.get("brightness", 100)))
-            LIVE["applied"] = None
-            LIVE["preview_until"] = time.time() + 15
-        return self._json_out(200, {"previewing": target, "seconds": 15})
+        n = len(controller_info()["zones"])
+        col = dim(color, int(cfg.get("brightness", 100)))
+        RENDER.show({"effect": effect, "colors": [col] * n, "pulse": [False] * n, "fade": 0.4})
+        LIVE["preview_until"] = time.time() + PREVIEW_SECONDS
+        WAKE.set()
+        return self._json_out(200, {"previewing": [effect, color], "seconds": PREVIEW_SECONDS})
+
+    def _simulate(self, req):
+        """Pretend a pool is DEGRADED for a few seconds, so the real alert path runs end to end."""
+        secs = SIMULATE_SECONDS if req.get("stop") is None else 0
+        LIVE["simulate_until"] = time.time() + secs if secs else 0
+        LIVE["preview_until"] = 0
+        WAKE.set()
+        return self._json_out(200, {"simulating": bool(secs), "seconds": secs})
+
+    def _push(self, req):
+        """Set the value shown on zones whose source is "push"."""
+        if PUSH_TOKEN:
+            got = self.headers.get("Authorization", "")
+            if not hmac.compare_digest(got.encode(), ("Bearer " + PUSH_TOKEN).encode()):
+                return self._err(401, "bad or missing push token")
+        zone = str(req.get("zone", "*")).strip() or "*"
+        if zone.isdigit():
+            zones = controller_info()["zones"]
+            zone = next((z["name"] for z in zones if z["index"] == int(zone)), None)
+            if zone is None:
+                return self._err(400, "no zone with that index")
+        key = zone.lower() if zone != "*" else "*"
+        if req.get("clear"):
+            PUSH.pop(key, None)
+        else:
+            color = str(req.get("color") or "").lstrip("#")
+            value = req.get("value")
+            if color and not HEX.match(color):
+                return self._err(400, "bad color")
+            if not color and value is None:
+                return self._err(400, "send a value or a color")
+            if value is not None:
+                value = float(value)
+                if not math.isfinite(value):
+                    return self._err(400, "bad value")
+            ttl = max(0, min(7 * 86400, int(req.get("ttl", 0))))
+            PUSH[key] = {"zone": zone, "value": value, "color": color.upper() or None,
+                         "pulse": bool(req.get("pulse")), "until": time.time() + ttl if ttl else 0,
+                         "at": time.time()}
+        WAKE.set()
+        return self._json_out(200, {"ok": True, "push": PUSH.get(key)})
 
     def _set_manual(self, req):
         mode = str(req.get("mode", "")).strip()
@@ -738,7 +1188,8 @@ class Handler(BaseHTTPRequestHandler):
         spd = None if spd is None else max(0, min(100, int(spd)))
         with LOCK:
             STATE["status_mode"] = "none"                 # manual control takes over
-            LIVE.update(applied=None, preview_until=0)
+            LIVE.update(preview_until=0, simulate_until=0)
+            RENDER.release()
             apply(mode, color or None, bri, spd, direction)
             STATE["manual"] = {"mode": mode, "color": (color or STATE.get("color") or "FFFFFF").upper(),
                                "brightness": bri if bri is not None else STATE.get("brightness", 100),
@@ -751,6 +1202,7 @@ class Handler(BaseHTTPRequestHandler):
             if spd is not None:
                 STATE["speed"] = spd
             save_state()
+            WAKE.set()
             return self._json_out(200, full_state())
 
     def log_message(self, fmt, *args):
@@ -760,6 +1212,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     print(f"NAS Lights {__version__} on http://{BIND}:{PORT} -> OpenRGB {OPENRGB_HOST}:{OPENRGB_PORT}, "
           f"device {OPENRGB_DEVICE}, data {DATA_DIR}", flush=True)
+    threading.Thread(target=RENDER.run, daemon=True, name="render").start()
     threading.Thread(target=status_loop, daemon=True, name="status").start()
     ThreadingHTTPServer((BIND, PORT), Handler).serve_forever()
 

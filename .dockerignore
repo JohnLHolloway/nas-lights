@@ -6,3 +6,5 @@ openrgb
 __pycache__
 *.pyc
 data
+tests
+tools

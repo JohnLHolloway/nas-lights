@@ -3,7 +3,7 @@
 FROM python:3.13-slim
 
 LABEL org.opencontainers.image.title="NAS Lights" \
-      org.opencontainers.image.description="Web UI and status lights for OpenRGB on a NAS: drive temp, CPU temp, network activity and ZFS health as colors." \
+      org.opencontainers.image.description="Web UI and status lights for OpenRGB on a NAS: per-zone drive temp, CPU temp, network, disk I/O and ZFS health as colors." \
       org.opencontainers.image.source="https://github.com/JohnLHolloway/nas-lights" \
       org.opencontainers.image.licenses="MIT"
 
