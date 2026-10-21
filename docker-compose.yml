@@ -1,0 +1,45 @@
+# NAS Lights + a headless OpenRGB server.
+#
+#   docker compose up -d --build
+#   open http://<nas-ip>:6780
+#
+# Already running OpenRGB somewhere else (another container, your PC)?
+# Delete the `openrgb` service and point OPENRGB_HOST at it.
+
+services:
+  openrgb:
+    build: ./openrgb
+    image: nas-lights-openrgb:1.1
+    restart: unless-stopped
+    # OpenRGB needs raw access to USB HID / SMBus RGB controllers.
+    privileged: true
+    volumes:
+      - /dev:/dev
+      - openrgb-config:/root/.config/OpenRGB
+    # Uncomment to use the OpenRGB desktop app as a client (SDK Client tab).
+    # There is no authentication on this port, so keep it on your LAN.
+    # ports:
+    #   - "6742:6742"
+
+  nas-lights:
+    build: .
+    image: nas-lights:0.1.0
+    restart: unless-stopped
+    depends_on: [openrgb]
+    environment:
+      OPENRGB_HOST: openrgb
+      OPENRGB_PORT: "6742"
+      OPENRGB_DEVICE: "0"          # device index, or part of its name, e.g. "ASRock"
+      # NET_IFACE: enp8s0          # default: busiest physical interface
+      # CPU_SENSOR: k10temp        # default: k10temp, zenpower, coretemp, cpu_thermal
+      # DRIVE_SENSOR: drivetemp    # hwmon name(s), comma separated; e.g. drivetemp,nvme
+    ports:
+      - "6780:6780"
+    volumes:
+      - nas-lights-data:/data
+      - /sys:/host/sys:ro                    # host NIC counters and hwmon sensors
+      - /etc/localtime:/etc/localtime:ro     # quiet hours use local time
+
+volumes:
+  openrgb-config:
+  nas-lights-data:

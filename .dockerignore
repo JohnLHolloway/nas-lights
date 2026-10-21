@@ -1,0 +1,8 @@
+.git
+docs
+openrgb
+*.md
+.gitignore
+__pycache__
+*.pyc
+data

@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NAS Lights</title>
+<style>
+:root{
+  --bg:#f4f4f6;--panel:#ffffff;--panel2:#f0f0f3;--fg:#15151a;--muted:#6b6b76;--line:#e3e3e8;
+  --acc:#4f46e5;--accfg:#fff;--ok:#16a34a;--bad:#dc2626;--glow:#00e070;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#09090c;--panel:#131318;--panel2:#1b1b22;--fg:#f2f2f5;--muted:#9a9aa6;--line:#26262f;
+  --acc:#818cf8;--accfg:#0b0b10;--ok:#4ade80;--bad:#f87171;
+}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:640px;margin:0 auto;padding:20px 16px 48px}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:9px 14px}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--acc);border-color:var(--acc);color:var(--accfg);font-weight:600}
+button.ghost{background:transparent}
+button:disabled{opacity:.5;cursor:progress}
+input[type=number],input[type=time],select{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 9px;width:100%}
+input[type=color]{-webkit-appearance:none;appearance:none;width:38px;height:38px;border:1px solid var(--line);border-radius:10px;padding:3px;background:var(--panel2);cursor:pointer}
+input[type=color]::-webkit-color-swatch-wrapper{padding:0}input[type=color]::-webkit-color-swatch{border:none;border-radius:7px}
+input[type=range]{width:100%;accent-color:var(--acc)}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:5px}
+
+/* hero */
+.hero{display:flex;align-items:center;gap:20px;padding:22px;border-radius:20px;background:var(--panel);border:1px solid var(--line);position:relative;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:-40%;background:radial-gradient(circle at 18% 50%,var(--glow) 0,transparent 42%);opacity:.22;transition:background .8s}
+.orb{flex:none;width:86px;height:86px;border-radius:50%;background:var(--glow);position:relative;
+  box-shadow:0 0 24px 4px var(--glow),0 0 70px 10px color-mix(in srgb,var(--glow) 45%,transparent),inset 0 -10px 22px rgba(0,0,0,.25),inset 0 8px 16px rgba(255,255,255,.35);
+  transition:background .8s,box-shadow .8s}
+.orb.off{background:#2a2a33;box-shadow:inset 0 -10px 22px rgba(0,0,0,.35),inset 0 8px 16px rgba(255,255,255,.08)}
+.orb.breathe{animation:breathe 2.4s ease-in-out infinite}
+@keyframes breathe{50%{filter:brightness(.35)}}
+.hero-txt{position:relative;min-width:0}
+.hero h1{font-size:24px;margin:0;letter-spacing:-.01em}
+.hero .big{font-size:30px;font-weight:700;letter-spacing:-.02em;margin:2px 0}
+.hero .sub{color:var(--muted);font-size:13px}
+.pill{display:inline-block;font-size:12px;padding:2px 9px;border-radius:99px;background:var(--panel2);border:1px solid var(--line);margin-right:6px;margin-top:6px}
+.pill.ok{color:var(--ok)}.pill.bad{color:var(--bad);border-color:var(--bad)}
+
+/* tabs */
+.tabs{display:flex;gap:6px;margin:18px 0 12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px}
+.tabs button{flex:1;border:none;background:transparent;border-radius:9px;padding:8px}
+.tabs button.on{background:var(--panel2);box-shadow:0 1px 0 var(--line);font-weight:600}
+section{display:none}section.on{display:block}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:12px}
+.card h2{font-size:15px;margin:0 0 4px}.card p.hint{color:var(--muted);font-size:13px;margin:0 0 12px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.grow{flex:1;min-width:120px}
+
+/* mode tiles */
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+.tile{text-align:left;padding:12px;border-radius:14px;background:var(--panel2);border:1px solid var(--line);position:relative}
+.tile.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset}
+.tile .t{font-size:13px;color:var(--muted)}
+.tile .v{font-size:20px;font-weight:700;margin-top:2px}
+.tile .chip{position:absolute;top:12px;right:12px;width:12px;height:12px;border-radius:50%}
+
+/* scale editor */
+.bar{position:relative;height:18px;border-radius:9px;margin:30px 0 26px;border:1px solid var(--line)}
+.bar .mark{position:absolute;top:-6px;width:4px;height:28px;border-radius:2px;background:var(--fg);transform:translateX(-2px);transition:left .6s}
+.bar .mark::after{content:attr(data-v);position:absolute;top:-20px;font-weight:600;left:50%;transform:translateX(-50%);font-size:11px;color:var(--fg);white-space:nowrap}
+.bar .tick{position:absolute;top:20px;font-size:10px;color:var(--muted);transform:translateX(-50%)}
+.stop{display:grid;grid-template-columns:38px 1fr auto auto;gap:8px;align-items:center;margin-bottom:6px}
+.stop .u{color:var(--muted);font-size:13px;min-width:40px}
+.stop button{padding:6px 10px}
+.swatches{display:flex;gap:8px;flex-wrap:wrap}
+.sw{width:38px;height:38px;border-radius:50%;padding:0;border:2px solid var(--line)}
+footer{margin-top:22px;text-align:center;color:var(--muted);font-size:12px}
+footer a{color:inherit}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(80px);background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;transition:transform .25s;max-width:90vw}
+#toast.show{transform:translateX(-50%) translateY(0)}
+.dirty{color:var(--acc);font-size:13px;display:none}.dirty.show{display:inline}
+</style>
+</head>
+<body>
+<main>
+  <div class="hero">
+    <div class="orb off" id="orb"></div>
+    <div class="hero-txt">
+      <h1>NAS Lights</h1>
+      <div class="big" id="heroBig">Loading</div>
+      <div class="sub" id="heroSub"></div>
+      <div id="pills"></div>
+    </div>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="on" data-tab="status">Status</button>
+    <button data-tab="manual">Manual</button>
+    <button data-tab="settings">Settings</button>
+  </div>
+
+  <!-- STATUS -->
+  <section id="tab-status" class="on">
+    <div class="card">
+      <h2>What should the lights show?</h2>
+      <p class="hint">Pick a reading. The color follows it live.</p>
+      <div class="tiles" id="tiles"></div>
+    </div>
+
+    <div class="card" id="scaleCard">
+      <div class="row" style="justify-content:space-between">
+        <h2 id="scaleTitle">Color scale</h2><span class="dirty" id="dirty">Unsaved changes</span>
+      </div>
+      <p class="hint">Each point sets the color at that reading. Colors blend in between.</p>
+      <div class="bar" id="bar"></div>
+      <div id="stops"></div>
+      <div class="row" style="margin-top:8px">
+        <button class="ghost" onclick="addStop()">+ Add point</button>
+        <button class="ghost" onclick="resetScale()">Reset to default</button>
+        <span class="grow"></span>
+        <button class="primary" onclick="saveScale()">Save scale</button>
+      </div>
+      <div style="height:16px"></div>
+      <label>Try it on the lights: <b id="tryV"></b> <span id="tryU"></span></label>
+      <div class="row"><input type="range" id="tryR" class="grow"><button onclick="preview()">Preview 15 s</button></div>
+    </div>
+  </section>
+
+  <!-- MANUAL -->
+  <section id="tab-manual">
+    <div class="card">
+      <h2>Manual control</h2>
+      <p class="hint">Using these switches status lights off.</p>
+      <div class="row"><button class="primary grow" onclick="go('Off')">Turn off</button><button class="grow" onclick="go('Static')">Turn on</button></div>
+      <div style="height:14px"></div>
+      <label>Quick colors</label><div class="swatches" id="sw"></div>
+      <div style="height:14px"></div>
+      <div class="row">
+        <div class="grow"><label for="mode">Effect</label><select id="mode" onchange="fxControls()"></select></div>
+        <div id="colRow"><label for="col">Color</label><input type="color" id="col" value="#ffffff"></div>
+      </div>
+      <p class="hint" id="fxHint" style="margin:10px 0 0"></p>
+      <div id="spdRow" style="margin-top:12px">
+        <label for="spd">Speed <span id="sv">50</span>%</label>
+        <div class="row"><span class="hint" style="margin:0">Slow</span><input type="range" id="spd" class="grow" min="0" max="100" value="50" oninput="sv.textContent=this.value"><span class="hint" style="margin:0">Fast</span></div>
+      </div>
+      <div id="dirRow" style="margin-top:12px">
+        <label for="dir">Direction</label><select id="dir"></select>
+      </div>
+      <div id="briRow" style="margin-top:12px">
+        <label for="bri">Brightness <span id="bv">100</span>%</label>
+        <input type="range" id="bri" min="0" max="100" value="100" oninput="bv.textContent=this.value">
+      </div>
+      <div style="height:14px"></div>
+      <button class="primary" style="width:100%" onclick="go(mode.value)">Apply</button>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="tab-settings">
+    <div class="card">
+      <h2>Problem alert</h2>
+      <p class="hint">Shown in any status mode when a pool is not healthy. It ignores quiet hours.</p>
+      <div class="row">
+        <div><label>Color</label><input type="color" id="aCol"></div>
+        <div class="grow"><label>Effect</label><select id="aFx"></select></div>
+        <div><label>&nbsp;</label><button onclick="preview('alert')">Preview</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Health only</h2>
+      <p class="hint">Color while every pool is healthy.</p>
+      <div class="row"><div><label>Color</label><input type="color" id="hCol"></div><div><label>&nbsp;</label><button onclick="preview('health')">Preview</button></div></div>
+    </div>
+    <div class="card">
+      <h2>Status lights</h2>
+      <label>Brightness <span id="sbv"></span>%</label><input type="range" id="sBri" min="5" max="100" oninput="sbv.textContent=this.value">
+      <div style="height:12px"></div>
+      <label>Smoothness: <span id="smv"></span> color steps between points</label><input type="range" id="sSm" min="1" max="16" oninput="smv.textContent=this.value">
+      <div style="height:12px"></div>
+      <label>Check every <span id="iv"></span> seconds</label><input type="range" id="sIv" min="2" max="60" oninput="iv.textContent=this.value">
+    </div>
+    <div class="card">
+      <h2>Quiet hours</h2>
+      <p class="hint">Turn the lights off or dim them overnight.</p>
+      <label class="row" style="color:var(--fg);font-size:15px"><input type="checkbox" id="qOn"> Enable quiet hours</label>
+      <div style="height:10px"></div>
+      <div class="row">
+        <div class="grow"><label>From</label><input type="time" id="qS"></div>
+        <div class="grow"><label>Until</label><input type="time" id="qE"></div>
+      </div>
+      <div style="height:10px"></div>
+      <div class="row">
+        <div class="grow"><label>During quiet hours</label><select id="qA"><option value="off">Turn off</option><option value="dim">Dim</option></select></div>
+        <div class="grow"><label>Dim to <span id="qdv"></span>%</label><input type="range" id="qD" min="1" max="60" oninput="qdv.textContent=this.value"></div>
+      </div>
+    </div>
+    <button class="primary" style="width:100%" onclick="saveSettings()">Save settings</button>
+  </section>
+  <footer id="foot"></footer>
+</main>
+<div id="toast"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+let S=null, editMode="drive_temp", draft=null;
+const ICON={drive_temp:"Drives",cpu_temp:"CPU",network:"Network",health:"Health",none:"Manual"};
+const QUICK=["FFFFFF","FF0000","FF7A00","FFD400","00E070","00C8FF","2962FF","AA00FF","FF2D95"];
+
+function toast(t){const e=$("toast");e.textContent=t;e.classList.add("show");clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove("show"),2600)}
+async function api(path,body){const r=await fetch(path,body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:{});
+  const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j}
+function busy(on){document.querySelectorAll("button,select,input").forEach(b=>b.disabled=on)}
+
+function showTab(name){const b=document.querySelector(`.tabs button[data-tab="${name}"]`);if(!b)return;
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.toggle("on",x===b));
+  document.querySelectorAll("section").forEach(s=>s.classList.toggle("on",s.id==="tab-"+name))}
+document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{showTab(b.dataset.tab);history.replaceState(null,"","#"+b.dataset.tab)});
+showTab((location.hash||"#status").slice(1));
+
+/* ---------- color helpers ---------- */
+const isLog=m=>m==="network";
+const fx=(m,v)=>isLog(m)?Math.log10(Math.max(+v,0.1)):+v;
+function hexRgb(h){return[0,2,4].map(i=>parseInt(h.substr(i,2),16))}
+function colorAt(m,stops,v){const s=[...stops].sort((a,b)=>a[0]-b[0]);const x=fx(m,v);
+  if(x<=fx(m,s[0][0]))return s[0][1];if(x>=fx(m,s[s.length-1][0]))return s[s.length-1][1];
+  for(let i=0;i<s.length-1;i++){const a=fx(m,s[i][0]),b=fx(m,s[i+1][0]);if(x>=a&&x<=b){const t=b>a?(x-a)/(b-a):0;
+    const A=hexRgb(s[i][1]),B=hexRgb(s[i+1][1]);return A.map((c,k)=>Math.round(c+(B[k]-c)*t).toString(16).padStart(2,"0")).join("").toUpperCase()}}
+  return s[0][1]}
+function fmt(m,v){if(v==null)return"--";return m==="network"?(v>=100?Math.round(v):v.toFixed(1))+" Mbps":v.toFixed(0)+"°C"}
+
+/* ---------- hero + tiles ---------- */
+function paintHero(){
+  const L=S.live, m=S.status_mode, a=L.applied, orb=$("orb");
+  let color=null, breathe=false;
+  if(m!=="none"&&a){if(a[0]!=="Off"){color=a[1];breathe=a[0]==="Breathing"}}
+  else if(m==="none"&&S.current&&S.current!=="Off"){color=S.color}
+  orb.classList.toggle("off",!color);orb.classList.toggle("breathe",breathe);
+  document.documentElement.style.setProperty("--glow",color?"#"+color:"#3a3a44");
+  let big,sub;
+  if(m==="none"){big=S.current==="Off"||!S.current?"Lights off":S.current;sub="Manual mode";}
+  else if(L.alert){big="Pool problem";sub=Object.entries(L.pools).filter(([k,v])=>v!=="ONLINE").map(([k,v])=>k+" is "+v).join(", ");}
+  else if(m==="health"){big="All healthy";sub="Health only";}
+  else{big=fmt(m,L.reading);sub=S.status_modes[m];}
+  if(m!=="none"&&L.quiet)sub+=" · quiet hours";
+  if(S.openrgb_error){big="OpenRGB offline";sub=S.openrgb_error}
+  else if(L.error&&m!=="none"){sub+=" · "+L.error}
+  $("heroBig").textContent=big;$("heroSub").textContent=sub;
+  $("pills").innerHTML=Object.entries(L.pools||{}).map(([k,v])=>`<span class="pill ${v==="ONLINE"?"ok":"bad"}">${k} ${v.toLowerCase()}</span>`).join("");
+  paintTiles();paintMarker();
+}
+function paintTiles(){
+  const t=$("tiles");const R=(S.live.readings||{});
+  t.innerHTML=Object.keys(S.status_modes).map(k=>{
+    let v="";if(k in R)v=fmt(k,R[k]);else if(k==="health")v=!Object.keys(S.live.pools||{}).length?"No pools":S.live.alert?"Problem":"OK";else v="Off";
+    let chip="";if(k in R&&R[k]!=null)chip=`<span class="chip" style="background:#${colorAt(k,S.config.scales[k],R[k])}"></span>`;
+    if(k==="health")chip=`<span class="chip" style="background:#${S.live.alert?S.config.alert.color:S.config.health_color}"></span>`;
+    return `<button class="tile ${S.status_mode===k?"on":""}" onclick="setStatus('${k}')"><div class="t">${ICON[k]}</div><div class="v">${v}</div>${chip}</button>`}).join("");
+}
+
+/* ---------- scale editor ---------- */
+function openScale(m){
+  if(!(m in S.config.scales))m=editMode in S.config.scales?editMode:"drive_temp";
+  editMode=m;draft=JSON.parse(JSON.stringify(S.config.scales[m]));
+  $("scaleTitle").textContent="Color scale: "+S.status_modes[m];$("dirty").classList.remove("show");
+  const [lo,hi]=S.limits[m];const r=$("tryR");
+  if(isLog(m)){r.min=-1;r.max=Math.log10(1000);r.step=0.01;r.value=fx(m,S.live.readings?.network??10)}
+  else{r.min=Math.min(lo+10,draft[0][0]-5);r.max=Math.max(draft[draft.length-1][0]+5,hi/1.5);r.step=1;r.value=S.live.readings?.[m]??draft[0][0]}
+  r.oninput=tryLabel;tryLabel();renderStops();
+}
+function tryVal(){const r=$("tryR");return isLog(editMode)?Math.pow(10,+r.value):+r.value}
+function tryLabel(){const v=tryVal();$("tryV").textContent=fmt(editMode,v);$("tryV").style.color="#"+colorAt(editMode,draft,v)}
+function renderStops(){
+  const u=S.units[editMode];
+  $("stops").innerHTML=draft.map((s,i)=>`<div class="stop">
+    <input type="color" value="#${s[1]}" oninput="draft[${i}][1]=this.value.slice(1).toUpperCase();changed()">
+    <input type="number" value="${s[0]}" step="${isLog(editMode)?1:0.5}" onchange="draft[${i}][0]=+this.value;changed(true)">
+    <span class="u">${u}</span>
+    <button class="ghost" ${draft.length<=2?"disabled":""} onclick="draft.splice(${i},1);changed(true)" aria-label="Remove point">✕</button></div>`).join("");
+  paintBar();
+}
+function paintBar(){
+  const m=editMode,s=[...draft].sort((a,b)=>a[0]-b[0]);const a=fx(m,s[0][0]),b=fx(m,s[s.length-1][0]);
+  const pos=v=>b>a?((fx(m,v)-a)/(b-a)*100):0;
+  const bar=$("bar");
+  bar.style.background=`linear-gradient(90deg,${s.map(x=>`#${x[1]} ${pos(x[0]).toFixed(1)}%`).join(",")})`;
+  bar.innerHTML=s.map(x=>`<span class="tick" style="left:${pos(x[0])}%">${x[0]}</span>`).join("")+`<span class="mark" id="mark"></span>`;
+  paintMarker();
+}
+function paintMarker(){
+  const mk=$("mark");if(!mk||!S)return;const v=S.live.readings?.[editMode];
+  if(v==null){mk.style.display="none";return}mk.style.display="block";
+  const s=[...draft].sort((a,b)=>a[0]-b[0]);const a=fx(editMode,s[0][0]),b=fx(editMode,s[s.length-1][0]);
+  const p=Math.max(0,Math.min(100,b>a?(fx(editMode,v)-a)/(b-a)*100:0));mk.style.left=p+"%";mk.dataset.v="now "+fmt(editMode,v);
+}
+function changed(resort){if(resort){draft.sort((a,b)=>a[0]-b[0]);renderStops()}else paintBar();$("dirty").classList.add("show");tryLabel()}
+function addStop(){
+  const s=draft,last=s[s.length-1],prev=s[s.length-2];
+  if(s.length>=10)return toast("Up to 10 points per scale");
+  const v=isLog(editMode)?Math.round(last[0]*2):Math.round(last[0]+(last[0]-prev[0]||5));
+  s.push([Math.min(v,S.limits[editMode][1]),"FF00FF"]);changed(true)}
+function resetScale(){draft=JSON.parse(JSON.stringify(S.defaults.scales[editMode]));changed(true)}
+async function saveScale(){
+  busy(true);try{S={...S,...await api("api/config",{scales:{[editMode]:draft}})};$("dirty").classList.remove("show");toast("Scale saved");openScale(editMode);paintHero()}
+  catch(e){toast("Not saved: "+e.message)}finally{busy(false)}}
+async function preview(kind){
+  busy(true);try{
+    if(!kind&&$("dirty").classList.contains("show"))toast("Previewing the saved scale. Save first to preview edits.");
+    await api("api/preview",kind?{mode:kind}:{mode:editMode,value:tryVal()});if(kind||!$("dirty").classList.contains("show"))toast("Previewing on the lights for 15 seconds")}
+  catch(e){toast("Preview failed: "+e.message)}finally{busy(false)}}
+
+/* ---------- status / manual ---------- */
+async function setStatus(k){busy(true);try{S=await api("api/status",{status_mode:k});if(k in S.config.scales)openScale(k);paintHero();toast(k==="none"?"Status lights off":S.status_modes[k])}
+  catch(e){toast("Failed: "+e.message)}finally{busy(false)}}
+async function go(m){busy(true);try{const d=$("dirRow").style.display!=="none"?$("dir").value:null;S=await api("api/set",{mode:m,color:$("col").value.slice(1),brightness:+$("bri").value,speed:+$("spd").value,direction:d});paintHero();toast(m==="Off"?"Lights off":"Applied "+m)}
+  catch(e){toast("Failed: "+e.message)}finally{busy(false)}}
+
+function fxControls(){
+  const caps=(S.effects&&S.effects.caps)||{};const c=caps[$("mode").value]||{};
+  const color=!!(c.per_led||c.mode_colors), speed=!!c.speed, bri=color||!!c.brightness;
+  $("colRow").style.display=color?"":"none";$("spdRow").style.display=speed?"":"none";$("briRow").style.display=bri?"":"none";
+  const dirs=c.directions||[];$("dirRow").style.display=dirs.length?"":"none";
+  if(dirs.length){const keep=$("dir").value;$("dir").innerHTML=dirs.map(d=>`<option>${d}</option>`).join("");if(dirs.includes(keep))$("dir").value=keep}
+  const bits=[];const name=$("mode").value;
+  if(name!=="Off"&&!speed&&!color&&!c.brightness)bits.push("has no adjustable options on this controller");
+  else{if(!color&&name!=="Off")bits.push("uses its own built-in colors");
+    if(color&&!c.brightness)bits.push("brightness is applied by dimming the color");}
+  $("fxHint").textContent=bits.length?$("mode").value+" "+bits.join("; ")+".":"";
+}
+
+/* ---------- settings ---------- */
+function fillSettings(){const c=S.config;
+  $("aCol").value="#"+c.alert.color;$("aFx").innerHTML=S.alert_effects.map(e=>`<option ${e===c.alert.effect?"selected":""}>${e}</option>`).join("");
+  $("hCol").value="#"+c.health_color;
+  $("sBri").value=c.brightness;$("sbv").textContent=c.brightness;$("sSm").value=c.smoothness;$("smv").textContent=c.smoothness;$("sIv").value=c.interval;$("iv").textContent=c.interval;
+  $("qOn").checked=c.quiet.enabled;$("qS").value=c.quiet.start;$("qE").value=c.quiet.end;$("qA").value=c.quiet.action;$("qD").value=c.quiet.dim;$("qdv").textContent=c.quiet.dim}
+async function saveSettings(){busy(true);try{
+  S=await api("api/config",{alert:{color:$("aCol").value.slice(1),effect:$("aFx").value},health_color:$("hCol").value.slice(1),
+    brightness:+$("sBri").value,smoothness:+$("sSm").value,interval:+$("sIv").value,
+    quiet:{enabled:$("qOn").checked,start:$("qS").value,end:$("qE").value,action:$("qA").value,dim:+$("qD").value}});
+  fillSettings();paintHero();toast("Settings saved")}catch(e){toast("Not saved: "+e.message)}finally{busy(false)}}
+
+/* ---------- boot ---------- */
+async function load(){try{S=await api("api/state");
+  $("sw").innerHTML=QUICK.map(c=>`<button class="sw" style="background:#${c}" title="#${c}" onclick="col.value='#${c}';go('Static')"></button>`).join("");
+  $("mode").innerHTML=S.modes.filter(m=>m!=="Direct").map(m=>`<option ${m===S.current?"selected":""}>${m}</option>`).join("");
+  $("col").value="#"+S.color;$("bri").value=S.brightness;$("bv").textContent=S.brightness;
+  const sp=(S.effects&&S.effects.speed_pct!=null)?S.effects.speed_pct:(S.speed??50);$("spd").value=sp;$("sv").textContent=sp;fxControls();
+  fillSettings();openScale(S.status_mode);paintHero();
+  $("foot").innerHTML=`NAS Lights ${S.version} · ${S.live.net_iface?"network: "+S.live.net_iface+" · ":""}${S.live.cpu_sensor?"cpu: "+S.live.cpu_sensor+" · ":""}<a href="https://github.com/JohnLHolloway/nas-lights" target="_blank" rel="noopener">GitHub</a>`}catch(e){$("heroBig").textContent="Offline";$("heroSub").textContent="Could not reach the lights server."}}
+async function poll(){if(!S)return;try{const j=await api("api/live");S.live=j.live;S.status_mode=j.status_mode;paintHero()}catch(e){}}
+load();setInterval(poll,4000);
+</script>
+</body>
+</html>
